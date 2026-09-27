@@ -1,0 +1,13 @@
+# Netlify build settings for this Next.js app.
+# The Next.js adapter (OpenNext) turns pages, server actions, and middleware into
+# Netlify functions — without it the .next folder is served as static files and every
+# route 404s.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
