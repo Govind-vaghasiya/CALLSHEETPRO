@@ -31,27 +31,36 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Protect all routes under /dashboard and /projects
-  const { pathname } = request.nextUrl
-  const isProtected =
-    pathname.startsWith('/dashboard') || pathname.startsWith('/projects')
-  const isAuthPage =
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/signup') ||
-    pathname.startsWith('/forgot-password') ||
-    pathname.startsWith('/reset-password')
-
-  if (isProtected && !user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    url.searchParams.set('redirectTo', pathname)
-    return NextResponse.redirect(url)
+  const { pathname, search } = request.nextUrl
+  const redirectTo = (path: string, params: Record<string, string> = {}) => {
+    const url = new URL(path, request.url) // path may carry its own ?query
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+    const response = NextResponse.redirect(url)
+    // keep any refreshed auth cookies
+    supabaseResponse.cookies.getAll().forEach((c) => response.cookies.set(c))
+    return response
   }
 
-  if (isAuthPage && user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
+  // Everything inside the app needs a signed-in user
+  const PROTECTED = ['/dashboard', '/projects', '/resources', '/schedule', '/callsheets', '/breakdown', '/org', '/account']
+  const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  if (isProtected && !user) {
+    return redirectTo('/login', { redirectTo: `${pathname}${search}` })
+  }
+
+  // Setting a new password needs the session created by the reset link
+  if (pathname.startsWith('/reset-password') && !user) {
+    return redirectTo('/forgot-password', {
+      error: 'Your reset link has expired or was already used. Please request a new one.',
+    })
+  }
+
+  // Signed-in users don't need the sign-in pages (but /reset-password must stay reachable)
+  const isSignInPage =
+    pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/forgot-password')
+  if (isSignInPage && user) {
+    const target = request.nextUrl.searchParams.get('redirectTo')
+    return redirectTo(target && target.startsWith('/') && !target.startsWith('//') ? target : '/dashboard')
   }
 
   return supabaseResponse

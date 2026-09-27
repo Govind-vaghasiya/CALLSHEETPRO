@@ -17,6 +17,7 @@ import {
   Calendar,
   Users,
   FileText,
+  UserRound,
 } from 'lucide-react'
 
 interface AppHeaderProps {
@@ -220,6 +221,15 @@ export function AppHeader({ user, organizations }: AppHeaderProps) {
                 </div>
 
                 <div className="p-1 border-t border-border">
+                  <Link
+                    href="/account"
+                    role="menuitem"
+                    onClick={() => setIsUserMenuOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-muted transition-colors"
+                  >
+                    <UserRound className="size-4" />
+                    Account settings
+                  </Link>
                   <form action={signOutAction}>
                     <button
                       type="submit"

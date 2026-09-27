@@ -3,8 +3,8 @@
 import { useActionState, Suspense } from 'react'
 import Link from 'next/link'
 import { resetPasswordAction, type AuthState } from '@/features/auth/actions'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Card,
@@ -46,11 +46,12 @@ function ResetPasswordForm() {
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="password">New Password (min 8 characters)</Label>
-            <Input
+            <Label htmlFor="password">New Password</Label>
+            <PasswordInput
+              showRules
+              autoFocus
               id="password"
               name="password"
-              type="password"
               placeholder="••••••••"
               required
               minLength={8}
@@ -61,10 +62,9 @@ function ResetPasswordForm() {
 
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">Confirm New Password</Label>
-            <Input
+            <PasswordInput
               id="confirmPassword"
               name="confirmPassword"
-              type="password"
               placeholder="••••••••"
               required
               minLength={8}

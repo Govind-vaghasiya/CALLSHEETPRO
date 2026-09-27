@@ -3,6 +3,8 @@
 import { useActionState, Suspense } from 'react'
 import Link from 'next/link'
 import { signUpAction, type AuthState } from '@/features/auth/actions'
+import { PasswordInput } from '@/components/ui/password-input'
+import { ResendConfirmation } from '@/features/auth/components/resend-confirmation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,7 +50,10 @@ function SignUpForm() {
           {state?.success && (
             <div className="flex items-start gap-3 p-3.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-sm animate-in fade-in">
               <CheckCircle2 className="size-5 shrink-0 mt-0.5" />
-              <span>{state.success}</span>
+              <div className="space-y-2">
+                <span>{state.success}</span>
+                <ResendConfirmation email={state.email} />
+              </div>
             </div>
           )}
 
@@ -72,6 +77,7 @@ function SignUpForm() {
               name="email"
               type="email"
               placeholder="producer@studio.com"
+              defaultValue={state?.email}
               required
               autoComplete="email"
               className="bg-background/80 border-border focus-visible:ring-amber-500 text-foreground placeholder:text-faint h-11"
@@ -79,11 +85,11 @@ function SignUpForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password">Password (min 8 characters)</Label>
-            <Input
+            <Label htmlFor="password">Password</Label>
+            <PasswordInput
+              showRules
               id="password"
               name="password"
-              type="password"
               placeholder="••••••••"
               required
               minLength={8}
@@ -94,10 +100,9 @@ function SignUpForm() {
 
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">Confirm Password</Label>
-            <Input
+            <PasswordInput
               id="confirmPassword"
               name="confirmPassword"
-              type="password"
               placeholder="••••••••"
               required
               minLength={8}

@@ -3,6 +3,7 @@
 import { useActionState, Suspense } from 'react'
 import Link from 'next/link'
 import { forgotPasswordAction, type AuthState } from '@/features/auth/actions'
+import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,9 +18,10 @@ import {
 import { KeyRound, AlertCircle, CheckCircle2, ArrowLeft, Loader2 } from 'lucide-react'
 
 function ForgotPasswordForm() {
+  const searchParams = useSearchParams()
   const [state, formAction, isPending] = useActionState<AuthState, FormData>(
     forgotPasswordAction,
-    {}
+    { error: searchParams.get('error') ?? undefined }
   )
 
   return (
@@ -59,6 +61,7 @@ function ForgotPasswordForm() {
               name="email"
               type="email"
               placeholder="producer@studio.com"
+              defaultValue={state?.email}
               required
               autoComplete="email"
               className="bg-background/80 border-border focus-visible:ring-amber-500 text-foreground placeholder:text-faint h-11"
@@ -78,7 +81,7 @@ function ForgotPasswordForm() {
                 Sending Recovery Link...
               </>
             ) : (
-              'Send Reset Link'
+              state?.success ? 'Send Another Link' : 'Send Reset Link'
             )}
           </Button>
 

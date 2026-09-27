@@ -4,6 +4,8 @@ import { useActionState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { signInAction, type AuthState } from '@/features/auth/actions'
+import { PasswordInput } from '@/components/ui/password-input'
+import { ResendConfirmation } from '@/features/auth/components/resend-confirmation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,11 +17,14 @@ import {
   CardContent,
   CardFooter,
 } from '@/components/ui/card'
-import { Film, AlertCircle, ArrowRight, Loader2 } from 'lucide-react'
+import { Film, AlertCircle, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react'
 
 function LoginForm() {
   const searchParams = useSearchParams()
   const urlError = searchParams.get('error')
+  const redirectTo = searchParams.get('redirectTo') || ''
+  const notice =
+    searchParams.get('notice') === 'signed-out-everywhere' ? 'You have been signed out on all devices.' : null
   const [state, formAction, isPending] = useActionState<AuthState, FormData>(
     signInAction,
     { error: urlError ?? undefined }
@@ -41,10 +46,20 @@ function LoginForm() {
 
       <form action={formAction}>
         <CardContent className="space-y-4 pt-6">
+          <input type="hidden" name="redirectTo" value={redirectTo} />
+          {notice && !state?.error && (
+            <div className="flex items-start gap-3 p-3.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-sm">
+              <CheckCircle2 className="size-5 shrink-0 mt-0.5" />
+              <span>{notice}</span>
+            </div>
+          )}
           {state?.error && (
-            <div className="flex items-start gap-3 p-3.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-sm animate-in fade-in">
+            <div role="alert" className="flex items-start gap-3 p-3.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-sm animate-in fade-in">
               <AlertCircle className="size-5 shrink-0 mt-0.5" />
-              <span>{state.error}</span>
+              <div className="space-y-2">
+                <span>{state.error}</span>
+                {state.needsConfirmation && <ResendConfirmation email={state.email} />}
+              </div>
             </div>
           )}
 
@@ -55,6 +70,7 @@ function LoginForm() {
               name="email"
               type="email"
               placeholder="producer@studio.com"
+              defaultValue={state?.email}
               required
               autoComplete="email"
               className="bg-background/80 border-border focus-visible:ring-amber-500 text-foreground placeholder:text-faint h-11"
@@ -71,10 +87,9 @@ function LoginForm() {
                 Forgot password?
               </Link>
             </div>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               placeholder="••••••••"
               required
               autoComplete="current-password"
