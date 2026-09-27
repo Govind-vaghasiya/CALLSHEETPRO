@@ -1,0 +1,480 @@
+'use client'
+
+import React, { useEffect, useState, useTransition } from 'react'
+import { useFeedback } from '@/components/ui/feedback-provider'
+import Link from 'next/link'
+import {
+  type ScriptDocumentWithStats,
+  makeScriptCurrentAction,
+  deleteScriptAction,
+  getScriptDeleteImpactAction,
+} from '@/features/scripts/actions'
+import {
+  getRevisionColorMeta,
+  formatScriptBadge,
+} from '@/features/scripts/lib/revision-colors'
+import { ScriptUploadModal } from './script-upload-modal'
+import { DeleteConfirmModal } from '@/components/ui/delete-confirm-modal'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import {
+  FileCode2,
+  Upload,
+  Layers,
+  BookOpen,
+  Calendar,
+  CheckCircle2,
+  Trash2,
+  Star,
+  Download,
+  Clock,
+  Sparkles,
+  ArrowRight,
+  Loader2,
+} from 'lucide-react'
+
+interface ScriptsHubProps {
+  projectId: string
+  projectName: string
+  scripts: ScriptDocumentWithStats[]
+}
+
+export function ScriptsHub({
+  projectId,
+  projectName,
+  scripts,
+}: ScriptsHubProps) {
+  const { confirm } = useFeedback()
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [scriptToDelete, setScriptToDelete] = useState<ScriptDocumentWithStats | null>(null)
+  const [deleteImpact, setDeleteImpact] = useState<Awaited<ReturnType<typeof getScriptDeleteImpactAction>>>(null)
+  const [deleteScenesToo, setDeleteScenesToo] = useState(false)
+
+  // Load what a delete would affect whenever a draft is picked for deletion
+  useEffect(() => {
+    if (!scriptToDelete) return
+    let cancelled = false
+    getScriptDeleteImpactAction(scriptToDelete.id).then((impact) => {
+      if (!cancelled) {
+        setDeleteImpact(impact)
+        setDeleteScenesToo(false)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [scriptToDelete])
+  const [isPending, startTransition] = useTransition()
+
+  const currentScript = scripts.find((s) => s.is_current) || scripts[0]
+
+  // Suggested next version and revision color
+  const maxVersion = scripts.reduce((max, s) => Math.max(max, s.version), 0)
+  const suggestedVersion = maxVersion + 1
+
+  const handleMakeCurrent = (scriptId: string) => {
+    startTransition(async () => {
+      const ok = await confirm({
+        title: 'Make this draft current?',
+        message:
+          'Production scenes will be updated to match it. Changed scenes are flagged, breakdowns and schedule placement are kept, and scenes missing from this draft are listed in its notes.',
+        confirmLabel: 'Make current',
+      })
+      if (!ok) return
+      await makeScriptCurrentAction(scriptId, projectId)
+    })
+  }
+
+  const handleDeleteScript = () => {
+    if (!scriptToDelete) return
+    startTransition(async () => {
+      await deleteScriptAction(scriptToDelete.id, projectId, { deleteScenes: deleteScenesToo })
+      setScriptToDelete(null)
+    })
+  }
+
+  return (
+    <div className="space-y-8 w-full">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Link
+              href={`/projects/${projectId}`}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {projectName}
+            </Link>
+            <span className="text-faint text-xs">/</span>
+            <span className="text-xs font-mono font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+              Screenplay & Breakdown Engine
+            </span>
+            <Badge variant="outline" className="text-[10px]">
+              {scripts.length} {scripts.length === 1 ? 'Draft' : 'Drafts'}
+            </Badge>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            Script Revisions & Scene Ingestion
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Ingest Final Draft (.fdx), PDF, or Fountain screenplays. Track Hollywood revision colors with automatic scene extraction.
+          </p>
+        </div>
+
+        <Button
+          onClick={() => setIsUploadModalOpen(true)}
+          className="h-10 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold shadow-lg shadow-amber-500/15 cursor-pointer"
+        >
+          <Upload className="size-4 mr-1.5" />
+          Upload New Draft
+        </Button>
+      </div>
+
+      {/* Metrics Ribbon */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Metric 1: Current Draft */}
+        <Card className="border-border bg-card/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-mono uppercase text-muted-foreground font-medium">
+              Current Shooting Draft
+            </CardTitle>
+            <Star className="size-4 text-amber-700 dark:text-amber-400" />
+          </CardHeader>
+          <CardContent>
+            {currentScript ? (
+              <div className="space-y-1">
+                <div className="text-xl font-bold text-foreground font-mono">
+                  v{currentScript.version}
+                </div>
+                <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  <span
+                    className={`size-2 rounded-full ${
+                      getRevisionColorMeta(currentScript.revision_color).dotBg
+                    }`}
+                  />
+                  <span>{getRevisionColorMeta(currentScript.revision_color).label}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-faint italic mt-1">No drafts uploaded</div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Metric 2: Extracted Scenes */}
+        <Card className="border-border bg-card/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-mono uppercase text-muted-foreground font-medium">
+              Extracted Scenes
+            </CardTitle>
+            <Layers className="size-4 text-amber-700 dark:text-amber-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground font-mono">
+              {currentScript?.total_scenes || 0}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">Detected sluglines</p>
+          </CardContent>
+        </Card>
+
+        {/* Metric 3: Total Pages */}
+        <Card className="border-border bg-card/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-mono uppercase text-muted-foreground font-medium">
+              Script Pages
+            </CardTitle>
+            <BookOpen className="size-4 text-amber-700 dark:text-amber-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground font-mono">
+              {currentScript?.total_pages || 0}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">Standard pages</p>
+          </CardContent>
+        </Card>
+
+        {/* Metric 4: Total Revisions */}
+        <Card className="border-border bg-card/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-mono uppercase text-muted-foreground font-medium">
+              Revisions In History
+            </CardTitle>
+            <Clock className="size-4 text-amber-700 dark:text-amber-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground font-mono">
+              {scripts.length}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">Version history archived</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Active Draft Banner (if scripts exist) */}
+      {currentScript && (
+        <div className="rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-card/60 to-card/80 p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Badge className="bg-amber-500 text-zinc-950 font-bold text-[10px] uppercase">
+                Active Production Script
+              </Badge>
+              <span
+                className={`text-xs px-2.5 py-0.5 rounded-md border font-medium inline-flex items-center gap-1.5 ${
+                  getRevisionColorMeta(currentScript.revision_color).pillBg
+                } ${getRevisionColorMeta(currentScript.revision_color).pillBorder} ${
+                  getRevisionColorMeta(currentScript.revision_color).pillText
+                }`}
+              >
+                <span
+                  className={`size-2 rounded-full ${
+                    getRevisionColorMeta(currentScript.revision_color).dotBg
+                  }`}
+                />
+                v{currentScript.version} · {getRevisionColorMeta(currentScript.revision_color).label}
+              </span>
+            </div>
+
+            <h3 className="text-lg font-bold text-foreground tracking-tight">
+              {currentScript.file_name}
+            </h3>
+
+            <p className="text-xs text-muted-foreground">
+              {currentScript.total_scenes} scenes detected across {currentScript.total_pages} pages
+              {currentScript.revision_date && ` · Issued ${new Date(currentScript.revision_date).toLocaleDateString()}`}
+              {currentScript.revision_notes && ` · "${currentScript.revision_notes}"`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch sm:self-auto shrink-0">
+            <Link
+              href={`/projects/${projectId}/scripts/${currentScript.id}`}
+              className="w-full sm:w-auto"
+            >
+              <Button className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs h-9 cursor-pointer">
+                <span>View Extracted Scenes & Breakdown</span>
+                <ArrowRight className="size-3.5 ml-1.5" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {scripts.length === 0 ? (
+        <Card className="border-dashed border-border bg-background/40 p-12 text-center max-w-xl mx-auto my-6">
+          <div className="flex flex-col items-center space-y-4">
+            <div className="size-16 rounded-2xl bg-card border border-border flex items-center justify-center text-amber-700 dark:text-amber-400 shadow-xl">
+              <FileCode2 className="size-8" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold text-foreground">
+                No Screenplay Uploaded Yet
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Upload your first screenplay draft in Final Draft (.fdx), PDF, or Fountain format. The ingestion engine will automatically extract all scenes, interior/exterior sluglines, and page counts.
+              </p>
+            </div>
+            <Button
+              onClick={() => setIsUploadModalOpen(true)}
+              className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold cursor-pointer shadow-lg shadow-amber-500/10"
+            >
+              <Upload className="size-4 mr-1.5" />
+              Upload Screenplay
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        /* Revisions History Catalog */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-foreground tracking-tight">
+              Screenplay Drafts & Revision History
+            </h2>
+            <span className="text-xs font-mono text-muted-foreground">
+              Sorted by latest revision
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card/60 overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-border bg-background/80 font-mono text-muted-foreground uppercase text-[11px]">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">Version & Revision</th>
+                    <th className="py-3 px-4 font-semibold">File Name</th>
+                    <th className="py-3 px-4 font-semibold">Format</th>
+                    <th className="py-3 px-4 font-semibold">Pages</th>
+                    <th className="py-3 px-4 font-semibold">Scenes</th>
+                    <th className="py-3 px-4 font-semibold">Revision Date / Notes</th>
+                    <th className="py-3 px-4 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {scripts.map((script) => {
+                    const colorMeta = getRevisionColorMeta(script.revision_color)
+                    return (
+                      <tr
+                        key={script.id}
+                        className={`hover:bg-muted/40 transition-colors ${
+                          script.is_current ? 'bg-amber-500/[0.03]' : ''
+                        }`}
+                      >
+                        {/* Version & Revision Badge */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2.5 py-1 rounded-md border text-xs font-semibold inline-flex items-center gap-1.5 ${colorMeta.pillBg} ${colorMeta.pillBorder} ${colorMeta.pillText}`}
+                            >
+                              <span className={`size-2 rounded-full ${colorMeta.dotBg}`} />
+                              v{script.version} · {colorMeta.label.split(' ')[0]}
+                            </span>
+                            {script.is_current && (
+                              <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px]">
+                                Active
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* File Name */}
+                        <td className="py-3.5 px-4 font-medium text-foreground max-w-xs truncate">
+                          <Link
+                            href={`/projects/${projectId}/scripts/${script.id}`}
+                            className="hover:text-amber-700 dark:hover:text-amber-400 transition-colors"
+                          >
+                            {script.file_name}
+                          </Link>
+                          {script.file_size_bytes && (
+                            <div className="text-[10px] text-faint font-mono">
+                              {(script.file_size_bytes / 1024).toFixed(1)} KB
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Format */}
+                        <td className="py-3.5 px-4 font-mono text-subtle-foreground">
+                          <Badge variant="outline" className="text-[10px] font-mono border-border-strong">
+                            {script.file_type}
+                          </Badge>
+                        </td>
+
+                        {/* Pages */}
+                        <td className="py-3.5 px-4 font-mono text-subtle-foreground">
+                          {script.total_pages || '—'}
+                        </td>
+
+                        {/* Scenes */}
+                        <td className="py-3.5 px-4 font-mono font-semibold text-amber-700 dark:text-amber-300">
+                          {script.total_scenes || '—'}
+                        </td>
+
+                        {/* Notes */}
+                        <td className="py-3.5 px-4 max-w-xs text-muted-foreground text-[11px]">
+                          {script.revision_notes ? (
+                            <div className="truncate text-subtle-foreground">
+                              {script.revision_notes}
+                            </div>
+                          ) : (
+                            <span className="text-faint italic">No notes</span>
+                          )}
+                          {script.revision_date && (
+                            <div className="text-[10px] text-faint font-mono">
+                              Issued: {new Date(script.revision_date).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            <Link href={`/projects/${projectId}/scripts/${script.id}`}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs border-border-strong text-subtle-foreground hover:text-foreground"
+                              >
+                                View Scenes
+                              </Button>
+                            </Link>
+
+                            {!script.is_current && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isPending}
+                                onClick={() => handleMakeCurrent(script.id)}
+                                className="h-8 text-xs border-border text-amber-700 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
+                              >
+                                Set as Active
+                              </Button>
+                            )}
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isPending}
+                              onClick={() => setScriptToDelete(script)}
+                              className="h-8 w-8 p-0 text-faint hover:text-red-700 dark:hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
+                              title="Delete Draft"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      <ScriptUploadModal
+        projectId={projectId}
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        suggestedVersion={suggestedVersion}
+      />
+
+      {/* Accidental Deletion Modal */}
+      {scriptToDelete && (
+        <DeleteConfirmModal
+          isOpen={Boolean(scriptToDelete)}
+          onClose={() => setScriptToDelete(null)}
+          onConfirm={handleDeleteScript}
+          title={`Delete Script Draft: ${scriptToDelete.file_name}`}
+          description={`Permanently remove version v${scriptToDelete.version} (${getRevisionColorMeta(scriptToDelete.revision_color).label}) and its file. Scenes are kept by default${
+            deleteImpact?.isCurrent && deleteImpact.otherDraftCount > 0 ? ' and the previous draft becomes current' : ''
+          }.`}
+          itemName={scriptToDelete.file_name}
+          itemType="screenplay file"
+          isPending={isPending}
+        >
+          {deleteImpact && deleteImpact.sceneCount > 0 && (
+            <div className="mt-3 space-y-2 rounded-lg border border-border bg-muted/50 p-3 text-xs text-left">
+              <p className="text-foreground">
+                This draft owns {deleteImpact.sceneCount} scenes — {deleteImpact.scheduledSceneCount} scheduled,{' '}
+                {deleteImpact.taggedElementCount} breakdown tags.
+              </p>
+              <label className="flex items-start gap-2 text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deleteScenesToo}
+                  onChange={(e) => setDeleteScenesToo(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Also delete these scenes, their breakdown, and their schedule placement (cannot be undone)
+                </span>
+              </label>
+            </div>
+          )}
+        </DeleteConfirmModal>
+      )}
+    </div>
+  )
+}
