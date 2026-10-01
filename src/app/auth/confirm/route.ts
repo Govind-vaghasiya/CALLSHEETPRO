@@ -40,6 +40,12 @@ export async function GET(request: NextRequest) {
 
   // Explain the failure where the user can fix it
   const sameBrowser = /code verifier|pkce/i.test(failed)
+
+  // Sign-up links: Supabase confirms the email *before* redirecting here, so a code that can't be
+  // exchanged (opened in another browser/app) still means "confirmed" — just sign in.
+  if (sameBrowser && !isRecovery) {
+    return NextResponse.redirect(new URL(`/login?notice=email-confirmed${rawNext ? `&redirectTo=${encodeURIComponent(next)}` : ''}`, url.origin))
+  }
   const message = sameBrowser
     ? 'Please open the link in the same browser you requested it from, or request a new one here.'
     : 'This link has expired or was already used. Please request a new one.'

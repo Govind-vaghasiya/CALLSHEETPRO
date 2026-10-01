@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { themeInitScript } from "@/components/theme/theme";
+import { AuthHashHandler } from "@/components/auth/auth-hash-handler";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -34,7 +35,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full flex flex-col font-sans bg-background text-foreground">{children}</body>
+      <body className="min-h-full flex flex-col font-sans bg-background text-foreground">
+        <AuthHashHandler />
+        {children}
+      </body>
     </html>
   );
 }

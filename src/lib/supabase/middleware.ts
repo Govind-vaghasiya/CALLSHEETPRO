@@ -41,6 +41,17 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Auth email links can land on any page (e.g. the Site URL when the redirect address isn't on
+  // Supabase's allow-list). Hand them to /auth/confirm so the code is exchanged, not ignored.
+  const sp = request.nextUrl.searchParams
+  const carriesAuth = sp.has('code') || sp.has('token_hash') || (sp.has('error') && sp.has('error_code'))
+  if (carriesAuth && !pathname.startsWith('/auth/')) {
+    const url = new URL('/auth/confirm', request.url)
+    sp.forEach((v, k) => url.searchParams.set(k, v))
+    if (!url.searchParams.has('next') && pathname !== '/') url.searchParams.set('next', pathname)
+    return NextResponse.redirect(url)
+  }
+
   // Everything inside the app needs a signed-in user
   const PROTECTED = ['/dashboard', '/projects', '/resources', '/schedule', '/callsheets', '/breakdown', '/org', '/account']
   const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`))

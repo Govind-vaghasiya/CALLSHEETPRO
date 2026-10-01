@@ -23,8 +23,11 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const urlError = searchParams.get('error')
   const redirectTo = searchParams.get('redirectTo') || ''
-  const notice =
-    searchParams.get('notice') === 'signed-out-everywhere' ? 'You have been signed out on all devices.' : null
+  const NOTICES: Record<string, string> = {
+    'signed-out-everywhere': 'You have been signed out on all devices.',
+    'email-confirmed': 'Your email is confirmed. Sign in to continue.',
+  }
+  const notice = NOTICES[searchParams.get('notice') || ''] ?? null
   const [state, formAction, isPending] = useActionState<AuthState, FormData>(
     signInAction,
     { error: urlError ?? undefined }

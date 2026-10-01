@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export type AuthState = {
   error?: string
@@ -214,11 +215,19 @@ export async function updateProfileAction(_prevState: AuthState | null, formData
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('user_profiles')
     .update({ full_name: fullName, ...(timezone ? { timezone } : {}) })
     .eq('id', user.id)
+    .select('id')
   if (error) return { error: error.message }
+  if (!updated || updated.length === 0) {
+    // Accounts created before the profile trigger have no row yet (users can't insert their own)
+    const { error: insertError } = await createAdminClient()
+      .from('user_profiles')
+      .insert({ id: user.id, full_name: fullName, ...(timezone ? { timezone } : {}) })
+    if (insertError) return { error: insertError.message }
+  }
 
   // Keep the auth profile in step (used in emails)
   await supabase.auth.updateUser({ data: { full_name: fullName } })

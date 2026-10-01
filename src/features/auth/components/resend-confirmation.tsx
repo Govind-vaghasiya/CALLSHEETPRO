@@ -1,25 +1,37 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useState, useTransition } from 'react'
 import { Loader2, MailCheck } from 'lucide-react'
 import { resendConfirmationAction, type AuthState } from '../actions'
 
-/** "Didn't get the email? Resend" — for sign-up confirmation links. */
+/**
+ * "Didn't get the email? Resend" — for sign-up confirmation links.
+ * A plain button (not a <form>) so it can sit inside the sign-in / sign-up forms.
+ */
 export function ResendConfirmation({ email }: { email?: string }) {
-  const [state, action, isPending] = useActionState<AuthState, FormData>(resendConfirmationAction, {})
+  const [state, setState] = useState<AuthState>({})
+  const [isPending, startTransition] = useTransition()
   if (!email) return null
+
+  const resend = () =>
+    startTransition(async () => {
+      const fd = new FormData()
+      fd.set('email', email)
+      setState(await resendConfirmationAction(null, fd))
+    })
+
   return (
-    <form action={action} className="text-sm space-y-1.5">
-      <input type="hidden" name="email" value={email} />
+    <div className="text-sm space-y-1.5">
       {state.success ? (
         <p className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-          <MailCheck className="size-4" /> {state.success}
+          <MailCheck className="size-4 shrink-0" /> {state.success}
         </p>
       ) : (
         <p className="text-muted-foreground">
           Didn&apos;t get the email? Check spam, or{' '}
           <button
-            type="submit"
+            type="button"
+            onClick={resend}
             disabled={isPending}
             className="font-medium text-amber-700 dark:text-amber-400 underline underline-offset-4 cursor-pointer disabled:opacity-60"
           >
@@ -35,6 +47,6 @@ export function ResendConfirmation({ email }: { email?: string }) {
         </p>
       )}
       {state.error && <p className="text-red-700 dark:text-red-400">{state.error}</p>}
-    </form>
+    </div>
   )
 }
