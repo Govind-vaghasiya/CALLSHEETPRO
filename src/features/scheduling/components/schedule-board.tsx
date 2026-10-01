@@ -52,6 +52,7 @@ import { createClient } from '@/lib/supabase/client'
 import { AssignScenePicker } from './assign-scene-picker'
 import { useFeedback } from '@/components/ui/feedback-provider'
 import { AutoScheduleModal } from './auto-schedule-modal'
+import { loadAutoScheduleContext, removeEmptyDays } from '../lib/auto-schedule-run'
 import { ConflictInspectorModal } from './conflict-inspector-modal'
 import { ScheduleVersionSwitcher } from '@/features/versioning/components/version-switcher'
 import { AiAnalysisModal } from '@/features/ai/components/ai-analysis-modal'
@@ -75,6 +76,8 @@ import {
   Crosshair,
   ChevronDown,
   EyeOff,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
 
 interface ScheduleBoardProps {
@@ -375,6 +378,7 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isCreatingDay, setIsCreatingDay] = useState(false)
   const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false)
+  const [isDeletingEmpty, setIsDeletingEmpty] = useState(false)
   const [isInspectorOpen, setIsInspectorOpen] = useState(false)
   const [isAiModalOpen, setIsAiModalOpen] = useState(false)
   const [isProposalsModalOpen, setIsProposalsModalOpen] = useState(false)
@@ -465,6 +469,44 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
     if (!res.success) notify(res.error || 'Could not add a shoot day', 'error')
     else logActivityAction(projectId, 'SHOOT_DAY_ADDED', `Added Day ${res.shootDay?.day_number ?? ''}`, res.shootDay?.shoot_date)
     loadSchedule()
+  }
+
+  // Delete every empty day at once (days with a call sheet, locked or started days are kept)
+  const handleDeleteEmptyDays = async () => {
+    if (!scheduleData) return
+    setIsDeletingEmpty(true)
+    try {
+      const ctx = await loadAutoScheduleContext(projectId, scheduleData)
+      const protectedCount = emptyDayCount - ctx.emptyDayIds.length
+      if (ctx.emptyDayIds.length === 0) {
+        notify('These empty days have a call sheet, are locked, or have started, so they were kept.', 'info')
+        return
+      }
+      const ok = await confirm({
+        title: `Delete ${ctx.emptyDayIds.length} empty shoot days?`,
+        message: [
+          protectedCount > 0 ? `${protectedCount} empty day(s) with a call sheet, a lock, or shooting started are kept.` : null,
+          ctx.numbersFixed ? null : 'Remaining days are renumbered in date order.',
+          'The current schedule is saved as a version first, so you can restore it.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        confirmLabel: 'Delete empty days',
+        destructive: true,
+      })
+      if (!ok) return
+      const res = await removeEmptyDays(projectId, ctx)
+      if (!res.success) notify(res.error || 'Could not delete the empty days', 'error')
+      else {
+        notify(`Deleted ${ctx.emptyDayIds.length} empty days. A backup version was saved.`, 'success')
+        setHideEmptyDays(false)
+      }
+    } catch {
+      notify('Could not delete the empty days. Please try again.', 'error')
+    } finally {
+      setIsDeletingEmpty(false)
+      loadSchedule()
+    }
   }
 
   // Assign Unscheduled Scene to Day
@@ -905,7 +947,16 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
               /* Horizontal / Grid Scrolling Shoot Days Columns */
               <div className="space-y-2">
               {emptyDayCount > 0 && (
-                <div className="flex items-center justify-end">
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDeleteEmptyDays}
+                    disabled={isDeletingEmpty}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 text-xs text-red-700 dark:text-red-400 hover:bg-red-500/10 cursor-pointer disabled:cursor-wait disabled:opacity-60 transition-colors"
+                  >
+                    {isDeletingEmpty ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                    Delete {emptyDayCount} empty days
+                  </button>
                   <button
                     type="button"
                     onClick={() => setHideEmptyDays((v) => !v)}
