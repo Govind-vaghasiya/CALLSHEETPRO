@@ -24,9 +24,20 @@ export function parseSlugline(line: string): {
   )
   if (!prefixMatch) return null
 
-  const explicitNum = prefixMatch[1] || prefixMatch[2]
   const prefix = prefixMatch[3].toUpperCase()
-  const rest = prefixMatch[4]
+  let rest = prefixMatch[4].replace(/[\t\u00a0]+/g, ' ').replace(/\(\s*PART\s+[A-Z0-9]+\s*\)/gi, ' ').trim()
+
+  // Scene number printed in the right margin too ("… NIGHT 14 14" / "… 24A 24A"): not part of the location.
+  // Only a repeated token (or the left-margin number) is removed, so "ROUTE 66" stays intact. Scene
+  // numbering is unchanged (new drafts match existing scenes by number).
+  const doubled = rest.match(/\s+([A-Z]?\d+[A-Z]{0,2})\s+\1\s*$/i)
+  if (doubled) {
+    rest = rest.slice(0, doubled.index).trim()
+  } else if (prefixMatch[1] || prefixMatch[2]) {
+    const same = rest.match(/\s+([A-Z]?\d+[A-Z]{0,2})\s*$/i)
+    if (same && same[1].toUpperCase() === (prefixMatch[1] || prefixMatch[2]).toUpperCase()) rest = rest.slice(0, same.index).trim()
+  }
+  const explicitNum = prefixMatch[1] || prefixMatch[2]
 
   // Look for time of day indicator anywhere near the end (after dash, period, comma, or space)
   const timeMatch = rest.match(

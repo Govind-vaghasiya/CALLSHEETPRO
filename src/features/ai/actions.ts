@@ -119,7 +119,7 @@ export async function analyzeScheduleHealthAction(projectId: string): Promise<Sc
       title: `${schedule.unscheduledScenes.length} Unscheduled Scenes in Pool`,
       description: `${schedule.unscheduledScenes.length} scenes are not placed on a shoot day yet.`,
       impact: 'The schedule is incomplete until every scene is placed.',
-      suggestedAction: 'Use Auto-Group or drag the remaining scenes onto shoot days.',
+      suggestedAction: 'Use Smart Auto-Schedule or drag the remaining scenes onto shoot days.',
     })
   }
 

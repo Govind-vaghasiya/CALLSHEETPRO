@@ -29,7 +29,6 @@ import {
   assignSceneToDayAction,
   removeSceneFromDayAction,
   reorderDayScenesAction,
-  autoGroupScheduleAction,
 } from '../actions'
 import {
   detectScheduleConflicts,
@@ -52,6 +51,7 @@ import { ScheduleFixModal, type FixRequest } from './schedule-fix-modal'
 import { createClient } from '@/lib/supabase/client'
 import { AssignScenePicker } from './assign-scene-picker'
 import { useFeedback } from '@/components/ui/feedback-provider'
+import { AutoScheduleModal } from './auto-schedule-modal'
 import { ConflictInspectorModal } from './conflict-inspector-modal'
 import { ScheduleVersionSwitcher } from '@/features/versioning/components/version-switcher'
 import { AiAnalysisModal } from '@/features/ai/components/ai-analysis-modal'
@@ -374,7 +374,7 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
   const [scheduleData, setScheduleData] = useState<ProjectScheduleData | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isCreatingDay, setIsCreatingDay] = useState(false)
-  const [isAutoGrouping, setIsAutoGrouping] = useState(false)
+  const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false)
   const [isInspectorOpen, setIsInspectorOpen] = useState(false)
   const [isAiModalOpen, setIsAiModalOpen] = useState(false)
   const [isProposalsModalOpen, setIsProposalsModalOpen] = useState(false)
@@ -464,14 +464,6 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
     setIsCreatingDay(false)
     if (!res.success) notify(res.error || 'Could not add a shoot day', 'error')
     else logActivityAction(projectId, 'SHOOT_DAY_ADDED', `Added Day ${res.shootDay?.day_number ?? ''}`, res.shootDay?.shoot_date)
-    loadSchedule()
-  }
-
-  // Auto-Group Schedule Handler
-  const handleAutoGroup = async () => {
-    setIsAutoGrouping(true)
-    await autoGroupScheduleAction(projectId)
-    setIsAutoGrouping(false)
     loadSchedule()
   }
 
@@ -817,12 +809,18 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
             <Button
               type="button"
               variant="outline"
-              onClick={handleAutoGroup}
-              disabled={isAutoGrouping || (scheduleData?.unscheduledScenes.length || 0) === 0}
+              onClick={() => setIsAutoScheduleOpen(true)}
+              disabled={!scheduleData || (scheduleData.unscheduledScenes.length === 0 && emptyDayCount === 0 && !scheduleData.shootDays.some((d) => /^Auto-(grouped|scheduled)/.test(d.notes || '')))}
               className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-mono h-9 cursor-pointer"
+              title="Plan unscheduled scenes into shoot days — preview before anything changes"
             >
-              <Wand2 className={`size-3.5 mr-1.5 ${isAutoGrouping ? 'animate-spin' : ''}`} />
-              <span>{isAutoGrouping ? 'Generating...' : 'Auto-Group Schedule'}</span>
+              <Wand2 className="size-3.5 mr-1.5" />
+              <span>Smart Auto-Schedule</span>
+              {emptyDayCount > 0 && (
+                <span className="ml-1.5 px-1.5 rounded bg-amber-500/15 text-[10px]" title={`${emptyDayCount} empty days`}>
+                  {emptyDayCount} empty
+                </span>
+              )}
             </Button>
 
             <Button
@@ -879,18 +877,18 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
                 <div className="space-y-1">
                   <h3 className="text-base font-bold text-foreground">No Shoot Days Created Yet</h3>
                   <p className="text-muted-foreground max-w-md mx-auto">
-                    Click <strong>&quot;+ Add Shoot Day&quot;</strong> to create Day 1 manually, or click <strong>&quot;Auto-Group Schedule&quot;</strong> to group unscheduled scenes by location automatically.
+                    Click <strong>&quot;+ Add Shoot Day&quot;</strong> to create Day 1 manually, or <strong>&quot;Smart Auto-Schedule&quot;</strong> to plan every scene into shoot days by location, pages and availability.
                   </p>
                 </div>
                 <div className="pt-2 flex items-center justify-center gap-2">
                   <Button
                     type="button"
-                    onClick={handleAutoGroup}
-                    disabled={isAutoGrouping}
+                    onClick={() => setIsAutoScheduleOpen(true)}
+                    disabled={!scheduleData || scheduleData.unscheduledScenes.length === 0}
                     className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs font-mono cursor-pointer"
                   >
                     <Wand2 className="size-3.5 mr-1.5" />
-                    <span>Auto-Group Schedule</span>
+                    <span>Smart Auto-Schedule</span>
                   </Button>
                   <Button
                     type="button"
@@ -984,6 +982,18 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
         currency={constraints.currency}
         onApplied={loadSchedule}
       />
+
+      {/* Mounted only while open, so every opening starts from fresh options */}
+      {isAutoScheduleOpen && (
+        <AutoScheduleModal
+          isOpen
+          onClose={() => setIsAutoScheduleOpen(false)}
+          projectId={projectId}
+          schedule={scheduleData}
+          constraints={constraints}
+          onApplied={loadSchedule}
+        />
+      )}
 
       {/* AI Schedule Advisor Modal */}
       <AiAnalysisModal
