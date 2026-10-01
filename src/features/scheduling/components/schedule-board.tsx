@@ -972,7 +972,9 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
                   </button>
                 </div>
               )}
-              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar min-h-[650px]">
+              {/* Framed strip: cards scroll inside rounded edges instead of being cut off square */}
+              <div className="rounded-2xl border border-border bg-muted/30 shadow-sm overflow-hidden">
+              <div className="flex gap-4 overflow-x-auto p-3 pb-4 custom-scrollbar min-h-[650px]">
                 {visibleDays.map((day) => (
                   <div key={day.id} id={`shoot-day-${day.id}`} className="shrink-0 scroll-mx-4">
                   <ShootDayColumn
@@ -987,6 +989,7 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
                   />
                   </div>
                 ))}
+              </div>
               </div>
               </div>
             )}
