@@ -1,16 +1,8 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { latestActiveProjectId } from '@/features/organizations/active-org'
 
+/** Opens this section in the latest production of the organization the user is working in. */
 export default async function ScheduleRedirect() {
-  const supabase = await createClient()
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id')
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (projects && projects.length > 0) {
-    redirect(`/projects/${projects[0].id}/schedule`)
-  }
-  redirect('/projects')
+  const projectId = await latestActiveProjectId()
+  redirect(projectId ? `/projects/${projectId}/schedule` : '/projects')
 }

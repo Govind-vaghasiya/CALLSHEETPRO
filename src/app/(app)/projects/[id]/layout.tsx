@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Calendar, Clock, ArrowLeft } from 'lucide-react'
 import { ProjectTabs } from '@/components/layout/project-tabs'
 import { CollaborationHeaderBar } from '@/features/collaboration/components/collaboration-header-bar'
+import { getActiveOrganization } from '@/features/organizations/active-org'
+import { SyncActiveOrganization } from '@/features/organizations/components/sync-active-organization'
 
 export default async function ProjectLayout({
   children,
@@ -20,9 +22,12 @@ export default async function ProjectLayout({
   if (!project) {
     notFound()
   }
+  const { active } = await getActiveOrganization()
+  const otherOrg = active?.organization.id !== project.organization_id
 
   return (
     <div className="flex-1 flex flex-col w-full">
+      {otherOrg && <SyncActiveOrganization organizationId={project.organization_id} />}
       {/* Project Sub-Header */}
       <div className="border-b border-border/80 bg-background/60 backdrop-blur-md px-4 sm:px-8 pt-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">

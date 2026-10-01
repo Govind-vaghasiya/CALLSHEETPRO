@@ -4,10 +4,8 @@ import { AppHeader } from '@/components/layout/app-header'
 import { FeedbackProvider } from '@/components/ui/feedback-provider'
 import { UrlNotice } from '@/components/ui/url-notice'
 import { Suspense } from 'react'
-import {
-  getCurrentUserWithProfile,
-  getUserOrganizations,
-} from '@/features/organizations/actions'
+import { getCurrentUserWithProfile } from '@/features/organizations/actions'
+import { getActiveOrganization } from '@/features/organizations/active-org'
 
 export default async function AppLayout({
   children,
@@ -20,9 +18,9 @@ export default async function AppLayout({
     redirect('/login')
   }
 
-  const organizations = await getUserOrganizations()
+  const { organizations, active } = await getActiveOrganization()
 
-  if (organizations.length === 0) {
+  if (!active) {
     redirect('/org/new')
   }
 
@@ -32,7 +30,7 @@ export default async function AppLayout({
         <Suspense>
           <UrlNotice />
         </Suspense>
-        <AppHeader user={user} organizations={organizations} />
+        <AppHeader user={user} organizations={organizations} activeOrgId={active.organization.id} />
         <main className="flex-1 flex flex-col">{children}</main>
       </FeedbackProvider>
     </div>

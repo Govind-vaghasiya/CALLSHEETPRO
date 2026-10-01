@@ -1,6 +1,8 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -73,6 +75,7 @@ export async function createOrganizationAction(
     return { error: memberError.message }
   }
 
+  await rememberActiveOrganization(org.id)
   redirect('/dashboard')
 }
 
@@ -117,6 +120,29 @@ export async function getUserOrganizations() {
       role: item.role,
       organization: item.organizations,
     }))
+    .sort((a, b) => a.organization.name.localeCompare(b.organization.name))
+}
+
+async function rememberActiveOrganization(orgId: string) {
+  // Name must match ACTIVE_ORG_COOKIE in ./active-org ('use server' files may only export async functions)
+  ;(await cookies()).set('csp_active_org', orgId, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 60 * 60 * 24 * 365,
+  })
+}
+
+/** Make `orgId` the active organization. Only organizations the user belongs to are accepted. */
+export async function switchOrganizationAction(orgId: string): Promise<{ error?: string }> {
+  const memberships = await getUserOrganizations()
+  if (!memberships.some((m) => m.organization.id === orgId)) {
+    return { error: 'You are not a member of that organization.' }
+  }
+  await rememberActiveOrganization(orgId)
+  revalidatePath('/', 'layout')
+  return {}
 }
 
 export async function getCurrentUserWithProfile() {

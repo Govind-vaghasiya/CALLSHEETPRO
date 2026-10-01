@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { ProjectType, ProjectStatus } from '@/types/database'
+import { getActiveOrganization } from '@/features/organizations/active-org'
 
 export type ProjectActionState = {
   error?: string
@@ -38,14 +39,9 @@ export async function createProjectAction(
     redirect('/login')
   }
 
-  // Get active organization
-  const { data: memberRows } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', user.id)
-    .limit(1)
-
-  const organizationId = memberRows?.[0]?.organization_id
+  // The production goes into the organization the user is working in (header switcher)
+  const { active } = await getActiveOrganization()
+  const organizationId = active?.organization.id
   if (!organizationId) {
     redirect('/org/new')
   }

@@ -1,10 +1,12 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useTransition } from 'react'
 import { useDismiss } from '@/components/ui/use-dismiss'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { signOutAction } from '@/features/auth/actions'
+import { switchOrganizationAction } from '@/features/organizations/actions'
+import { useFeedback } from '@/components/ui/feedback-provider'
 import { ThemeSegmentedControl, ThemeToggleButton } from '@/components/theme/theme-toggle'
 import {
   Clapperboard,
@@ -18,6 +20,8 @@ import {
   Users,
   FileText,
   UserRound,
+  Check,
+  Loader2,
 } from 'lucide-react'
 
 interface AppHeaderProps {
@@ -38,21 +42,50 @@ interface AppHeaderProps {
       logo_url?: string | null
     }
   }>
+  /** Organization the user is working in (chosen in the switcher, remembered in a cookie) */
+  activeOrgId: string
 }
 
-export function AppHeader({ user, organizations }: AppHeaderProps) {
+export function AppHeader({ user, organizations, activeOrgId }: AppHeaderProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false)
   const orgMenuRef = useDismiss(isOrgMenuOpen, () => setIsOrgMenuOpen(false))
   const userMenuRef = useDismiss(isUserMenuOpen, () => setIsUserMenuOpen(false))
 
-  const activeOrg = organizations[0]?.organization || {
-    id: '',
-    name: 'Production Studio',
-    slug: 'studio',
+  const { notify } = useFeedback()
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null)
+  const [, startSwitch] = useTransition()
+
+  const activeMembership = organizations.find((m) => m.organization.id === activeOrgId) ?? organizations[0]
+  const activeOrg = activeMembership?.organization || { id: '', name: 'Production Studio', slug: 'studio' }
+  const userRole = activeMembership?.role || 'OWNER'
+
+  const switchOrganization = (orgId: string) => {
+    if (orgId === activeOrg.id) {
+      setIsOrgMenuOpen(false)
+      return
+    }
+    setSwitchingTo(orgId)
+    startSwitch(async () => {
+      try {
+        const result = await switchOrganizationAction(orgId)
+        if (result.error) {
+          notify(result.error, 'error')
+          return
+        }
+        // Productions belong to one organization, so switching lands on its dashboard
+        router.push('/dashboard')
+        router.refresh()
+      } catch {
+        notify('Could not switch organization. Please try again.', 'error')
+      } finally {
+        setSwitchingTo(null)
+        setIsOrgMenuOpen(false)
+      }
+    })
   }
-  const userRole = organizations[0]?.role || 'OWNER'
 
   // Inside a production, section links stay in that production instead of
   // jumping to whichever project was created most recently.
@@ -148,15 +181,32 @@ export function AppHeader({ user, organizations }: AppHeaderProps) {
               >
                 <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Your organizations</div>
                 <div className="space-y-1 my-1">
-                  {organizations.map((item) => (
-                    <div
-                      key={item.organization.id}
-                      className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-muted text-sm text-foreground"
-                    >
-                      <span className="font-medium truncate">{item.organization.name}</span>
-                      <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400">{item.role}</span>
-                    </div>
-                  ))}
+                  {organizations.map((item) => {
+                    const isActive = item.organization.id === activeOrg.id
+                    return (
+                      <button
+                        key={item.organization.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={isActive}
+                        disabled={switchingTo !== null}
+                        onClick={() => switchOrganization(item.organization.id)}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer disabled:cursor-wait ${
+                          isActive ? 'bg-amber-500/10 text-foreground' : 'text-foreground hover:bg-muted'
+                        }`}
+                      >
+                        <span className="size-4 shrink-0 flex items-center justify-center">
+                          {switchingTo === item.organization.id ? (
+                            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                          ) : isActive ? (
+                            <Check className="size-3.5 text-amber-700 dark:text-amber-400" />
+                          ) : null}
+                        </span>
+                        <span className="font-medium truncate flex-1">{item.organization.name}</span>
+                        <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400">{item.role}</span>
+                      </button>
+                    )
+                  })}
                 </div>
                 <div className="pt-2 mt-1 border-t border-border">
                   <Link

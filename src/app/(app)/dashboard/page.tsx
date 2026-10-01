@@ -1,10 +1,8 @@
 import React from 'react'
+import { getActiveOrganization } from '@/features/organizations/active-org'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import {
-  getCurrentUserWithProfile,
-  getUserOrganizations,
-} from '@/features/organizations/actions'
+import { getCurrentUserWithProfile } from '@/features/organizations/actions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,8 +20,8 @@ import {
 
 export default async function DashboardPage() {
   const user = await getCurrentUserWithProfile()
-  const organizations = await getUserOrganizations()
-  const activeOrg = organizations[0]?.organization
+  const { active } = await getActiveOrganization()
+  const activeOrg = active?.organization
 
   const supabase = await createClient()
 

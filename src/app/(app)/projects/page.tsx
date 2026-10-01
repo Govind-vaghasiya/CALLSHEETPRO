@@ -1,7 +1,7 @@
 import React from 'react'
+import { getActiveOrganization } from '@/features/organizations/active-org'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { getUserOrganizations } from '@/features/organizations/actions'
 import { getProjects } from '@/features/projects/actions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,8 +15,8 @@ import {
 } from 'lucide-react'
 
 export default async function ProjectsPage() {
-  const organizations = await getUserOrganizations()
-  const activeOrg = organizations[0]?.organization
+  const { active } = await getActiveOrganization()
+  const activeOrg = active?.organization
 
   if (!activeOrg) {
     redirect('/org/new')
