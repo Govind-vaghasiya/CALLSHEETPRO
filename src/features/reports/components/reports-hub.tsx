@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { escapeHtml, printElement } from '@/lib/print/print-document'
 import { FileText, Download, Printer, Users, Camera, MapPin, Table } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -57,37 +58,35 @@ export function ReportsHub({ reportData }: ReportsHubProps) {
     document.body.removeChild(link)
   }
 
+  const printRef = useRef<HTMLDivElement>(null)
+  const TAB_LABEL = { CAST: 'Cast', EQUIPMENT: 'Equipment & Props', LOCATION: 'Locations' } as const
+
   function handlePrint() {
-    window.print()
+    if (!printRef.current) return
+    const today = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    printElement(printRef.current, {
+      title: `${reportData.project_name} — Day Out of Days (${TAB_LABEL[activeTab]})`,
+      size: 'Letter',
+      orientation: 'landscape',
+      margin: '0.4in',
+      fitToWidth: true,
+      pageNumbers: true,
+      headerHtml: `<header style="font-family:-apple-system,'Segoe UI',sans-serif;margin-bottom:10px;">
+        <div style="font-size:16px;font-weight:700;">${escapeHtml(reportData.project_name)} — Day Out of Days: ${TAB_LABEL[activeTab]}</div>
+        <div style="font-size:10px;color:#555;">${reportData.shoot_days.length} shoot days · printed ${escapeHtml(today)} ·
+          SW Start Work · W Work · WF Work Finish · SWF Start-Work-Finish · H Hold · T Travel</div>
+      </header>`,
+      css: `
+        table { width: 100%; font-size: 9px; }
+        th, td { border: 1px solid #bbb !important; color: #000 !important; padding: 2px 4px !important; }
+        th { background: #f1f1f1 !important; }
+        [class*="sticky"] { position: static !important; }
+      `,
+    })
   }
 
   return (
     <div className="space-y-6">
-      {/* Printable CSS rules */}
-      <style jsx global>{`
-        @media print {
-          body {
-            background-color: white !important;
-            color: black !important;
-          }
-          nav, header, button, .no-print {
-            display: none !important;
-          }
-          .print-area {
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-          table {
-            border: 1px solid #ccc !important;
-            color: black !important;
-          }
-          th, td {
-            border: 1px solid #ddd !important;
-            color: black !important;
-            background: white !important;
-          }
-        }
-      `}</style>
 
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-background/80 border border-border/80 p-5 rounded-2xl backdrop-blur-md no-print">
@@ -194,7 +193,7 @@ export function ReportsHub({ reportData }: ReportsHubProps) {
       </div>
 
       {/* Active DOOD Table */}
-      <div className="print-area">
+      <div className="print-area" ref={printRef}>
         {activeTab === 'CAST' && (
           <DoodMatrixTable
             title="Cast Day-Out-of-Days Matrix"

@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { printElement } from '@/lib/print/print-document'
 import Link from 'next/link'
 import { Calendar, FileText, Film, Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -39,6 +40,26 @@ export function GuestViewer({
     ...(dood ? [{ id: 'DOOD' as const, label: 'Day Out of Days', icon: Film }] : []),
   ]
   const [activeTab, setActiveTab] = useState<Tab>(tabs[0]?.id || 'CALL_SHEET')
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // Print only what the guest is looking at, as a clean document
+  const handlePrint = () => {
+    if (!contentRef.current) return
+    const what = activeTab === 'CALL_SHEET' ? 'Call Sheet' : activeTab === 'STRIPBOARD' ? 'Shooting Schedule' : 'Day Out of Days'
+    printElement(contentRef.current, {
+      title: `${projectName} — ${what}${activeTab === 'CALL_SHEET' && callSheet ? ` Day ${callSheet.currentDay.day_number ?? ''}` : ''}`,
+      size: 'Letter',
+      orientation: activeTab === 'DOOD' ? 'landscape' : 'portrait',
+      margin: '0.4in',
+      fitToWidth: activeTab === 'DOOD',
+      pageNumbers: activeTab !== 'CALL_SHEET',
+      css: `
+        .print-area { box-shadow: none !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; max-width: none !important; }
+        table { font-size: 9px; }
+        [class*="sticky"] { position: static !important; }
+      `,
+    })
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -52,13 +73,13 @@ export function GuestViewer({
           </div>
           <p className="text-xs text-muted-foreground">Shared by the production office via CallSheetPro</p>
         </div>
-        <Button type="button" variant="outline" onClick={() => window.print()} className="text-xs h-9 gap-1.5 cursor-pointer">
+        <Button type="button" variant="outline" onClick={handlePrint} className="text-xs h-9 gap-1.5 cursor-pointer">
           <Printer className="size-3.5" />
           Print / Save PDF
         </Button>
       </header>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
+      <main ref={contentRef} className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
         {tabs.length > 1 && (
           <nav className="no-print flex flex-wrap items-center gap-2 border-b border-border pb-3">
             {tabs.map((tab) => (

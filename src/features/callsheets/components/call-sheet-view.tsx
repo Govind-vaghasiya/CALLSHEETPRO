@@ -1,6 +1,15 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { printElement } from '@/lib/print/print-document'
+
+/** The call sheet "paper" fills the printed page: no card shadow, rounding, or screen padding. */
+const CALL_SHEET_PRINT_CSS = `
+  .print-area { box-shadow: none !important; border: 0 !important; border-radius: 0 !important;
+    padding: 0 !important; margin: 0 !important; max-width: none !important; width: 100% !important; }
+  .print-area > * { break-inside: avoid; }
+  body { font-size: 11px; }
+`
 import type { CallSheetFullData } from '../actions'
 import { getCallSheetDataAction, publishCallSheetAction } from '../actions'
 import { CallSheetPaper } from './call-sheet-paper'
@@ -59,36 +68,19 @@ export function CallSheetView({ initialData, projectId }: CallSheetViewProps) {
   }
 
   // Print Handler
+  const paperRef = useRef<HTMLDivElement>(null)
   const handlePrint = () => {
-    window.print()
+    if (!paperRef.current) return
+    printElement(paperRef.current, {
+      title: `${data.project.name} — Call Sheet Day ${currentDay.day_number ?? ''} (${currentDay.shoot_date})`,
+      size: 'Letter',
+      margin: '0.4in',
+      css: CALL_SHEET_PRINT_CSS,
+    })
   }
 
   return (
     <div className="space-y-6 w-full">
-      {/* PRINT-ONLY STYLES INJECTION */}
-      <style jsx global>{`
-        @media print {
-          body {
-            background-color: #ffffff !important;
-            color: #000000 !important;
-          }
-          /* Hide app layout navigation and buttons during print */
-          header,
-          nav,
-          aside,
-          .no-print {
-            display: none !important;
-          }
-          .print-area {
-            box-shadow: none !important;
-            border: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-        }
-      `}</style>
 
       {/* TOP CONTROL RIBBON (Hidden during print) */}
       <div className="no-print bg-background border border-border p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
@@ -162,7 +154,9 @@ export function CallSheetView({ initialData, projectId }: CallSheetViewProps) {
       </div>
 
       {/* CALL SHEET PAPER CANVAS */}
-      <CallSheetPaper data={data} />
+      <div ref={paperRef}>
+        <CallSheetPaper data={data} />
+      </div>
 
       {/* Editor Modal */}
       <CallSheetEditorModal

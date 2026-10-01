@@ -28,6 +28,8 @@ import { ScreenplayEditor } from './screenplay-editor'
 import { ShortcutsModal } from './shortcuts-modal'
 import { ScriptMetadataModal } from './script-metadata-modal'
 import { exportToFountain, exportToFDX } from '../lib/screenplay-export-utils'
+import { printFullScript, printScenes } from '../lib/screenplay-print'
+import { useDismiss } from '@/components/ui/use-dismiss'
 import type { RevisionColor } from '@/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -211,6 +213,24 @@ export function ScreenplayReader({
       return numMatch || locMatch || headingMatch || descMatch
     })
   }, [scenes, searchQuery])
+
+  // ---- PDF / print: a clean screenplay document, never the screen
+  const [isPrintMenuOpen, setIsPrintMenuOpen] = useState(false)
+  const printMenuRef = useDismiss(isPrintMenuOpen, () => setIsPrintMenuOpen(false))
+  const printTitle = script.file_name.replace(/\.(pdf|fdx|fountain|txt)$/i, '')
+  const draftLabel = `${getRevisionColorMeta(script.revision_color).label} Draft v${script.version}`
+  const handlePrintScene = () => {
+    setIsPrintMenuOpen(false)
+    if (activeSceneObj) printScenes({ title: printTitle, draftLabel, scenes: [activeSceneObj] })
+  }
+  const handlePrintFiltered = () => {
+    setIsPrintMenuOpen(false)
+    printScenes({ title: printTitle, draftLabel, scenes: filteredScenes })
+  }
+  const handlePrintFull = () => {
+    setIsPrintMenuOpen(false)
+    printFullScript({ title: printTitle, draftLabel, date: script.revision_date, pages, scenes })
+  }
 
   // Formatted Screenplay Lines for the SELECTED SCENE
   const selectedSceneLines = useMemo(() => {
@@ -680,15 +700,58 @@ export function ScreenplayReader({
 
           {/* Multi-Format Export Suite */}
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="px-2 py-1 text-xs font-mono rounded-lg border border-border bg-background text-subtle-foreground hover:text-foreground hover:border-border-strong transition-colors cursor-pointer flex items-center gap-1"
-              title="Print Screenplay PDF"
-            >
-              <Printer className="size-3" />
-              <span className="hidden md:inline">PDF</span>
-            </button>
+            <div className="relative" ref={printMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsPrintMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={isPrintMenuOpen}
+                className="px-2 py-1 text-xs font-mono rounded-lg border border-border bg-background text-subtle-foreground hover:text-foreground hover:border-border-strong transition-colors cursor-pointer flex items-center gap-1"
+                title="Print or save as PDF"
+              >
+                <Printer className="size-3" />
+                <span className="hidden md:inline">PDF</span>
+                <ChevronDown className="size-3" />
+              </button>
+              {isPrintMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-50 mt-1 w-60 rounded-xl border border-border bg-popover p-1 shadow-xl text-sm"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handlePrintScene}
+                    disabled={!activeSceneObj}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted cursor-pointer disabled:opacity-50"
+                  >
+                    This scene{activeSceneObj ? ` (Sc ${activeSceneObj.scene_number})` : ''}
+                  </button>
+                  {searchQuery.trim() && filteredScenes.length > 1 && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handlePrintFiltered}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted cursor-pointer"
+                    >
+                      Filtered scenes ({filteredScenes.length})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handlePrintFull}
+                    disabled={pages.length === 0}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted cursor-pointer disabled:opacity-50"
+                  >
+                    Full script ({pages.length} pages)
+                  </button>
+                  <p className="px-3 pt-1 pb-2 text-[11px] text-muted-foreground">
+                    Choose &ldquo;Save as PDF&rdquo; in the print dialog to get a file.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <button
               type="button"
