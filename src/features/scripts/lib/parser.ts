@@ -270,16 +270,9 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ScriptParseResult>
   setupNodePdfPolyfills()
 
   const pdfModule = require('pdf-parse')
+  // pdfjs imports pdf.worker.mjs next to this entry file at runtime; next.config.ts
+  // adds it to the server bundle (outputFileTracingIncludes) since tracing can't see it.
   const PDFParseClass = pdfModule.PDFParse || pdfModule.default?.PDFParse || pdfModule
-
-  // pdfjs loads its worker from pdf.worker.mjs next to pdf-parse's entry file, which
-  // Netlify's function bundle leaves out ("Setting up fake worker failed: Cannot find
-  // module .../pdf.worker.mjs"). Hand it the worker inlined as a data: URL instead,
-  // the setup pdf-parse documents for serverless hosts.
-  if (typeof PDFParseClass?.setWorker === 'function') {
-    const { getData } = require('pdf-parse/worker')
-    PDFParseClass.setWorker(getData())
-  }
 
   let rawPages: Array<{ pageNumber: number; rawText: string }> = []
   let totalPages = 1
