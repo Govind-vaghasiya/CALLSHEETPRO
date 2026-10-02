@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { logActivityAction } from '@/features/collaboration/actions'
 import {
   DndContext,
@@ -76,6 +76,8 @@ import {
   Crosshair,
   ChevronDown,
   EyeOff,
+  ChevronLeft,
+  ChevronRight,
   Trash2,
   Loader2,
 } from 'lucide-react'
@@ -386,6 +388,29 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
   const [pickerDayId, setPickerDayId] = useState<string | null>(null)
   const [scope, setScope] = useState<SceneScope>('UNSCHEDULED')
   const [hideEmptyDays, setHideEmptyDays] = useState(false)
+  // Horizontal day track: arrow buttons + whether there is more to either side
+  const dayTrackRef = useRef<HTMLDivElement>(null)
+  const [dayScroll, setDayScroll] = useState({ atStart: true, atEnd: false })
+  const updateDayScroll = () => {
+    const el = dayTrackRef.current
+    if (!el) return
+    setDayScroll({ atStart: el.scrollLeft <= 4, atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4 })
+  }
+  // Re-check when the track resizes or days change (the observer also fires once on start)
+  useEffect(() => {
+    const el = dayTrackRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() =>
+      setDayScroll({ atStart: el.scrollLeft <= 4, atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4 })
+    )
+    ro.observe(el)
+    if (el.firstElementChild) ro.observe(el.firstElementChild)
+    return () => ro.disconnect()
+  }, [scheduleData, hideEmptyDays])
+  const scrollDays = (direction: 1 | -1) => {
+    const el = dayTrackRef.current
+    if (el) el.scrollBy({ left: direction * Math.max(320, el.clientWidth * 0.8), behavior: 'smooth' })
+  }
   const [searchIndex, setSearchIndex] = useState<Map<string, SceneSearchExtras>>(new Map())
   const [constraints, setConstraints] = useState<ScheduleConstraints>(EMPTY_CONSTRAINTS)
   const [fixRequest, setFixRequest] = useState<FixRequest | null>(null)
@@ -944,53 +969,90 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
                 </div>
               </div>
             ) : (
-              /* Horizontal / Grid Scrolling Shoot Days Columns */
-              <div className="space-y-2">
-              {emptyDayCount > 0 && (
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleDeleteEmptyDays}
-                    disabled={isDeletingEmpty}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 text-xs text-red-700 dark:text-red-400 hover:bg-red-500/10 cursor-pointer disabled:cursor-wait disabled:opacity-60 transition-colors"
-                  >
-                    {isDeletingEmpty ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                    Delete {emptyDayCount} empty days
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHideEmptyDays((v) => !v)}
-                    aria-pressed={hideEmptyDays}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                      hideEmptyDays
-                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-300'
-                        : 'border-border text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <EyeOff className="size-3.5" />
-                    {hideEmptyDays ? `Showing days with scenes (${emptyDayCount} empty hidden)` : `Hide ${emptyDayCount} empty days`}
-                  </button>
-                </div>
-              )}
-              {/* Framed strip: cards scroll inside rounded edges instead of being cut off square */}
-              <div className="rounded-2xl border border-border bg-muted/30 shadow-sm overflow-hidden">
-              <div className="flex gap-4 overflow-x-auto p-3 pb-4 custom-scrollbar min-h-[650px]">
-                {visibleDays.map((day) => (
-                  <div key={day.id} id={`shoot-day-${day.id}`} className="shrink-0 scroll-mx-4">
-                  <ShootDayColumn
-                    day={day}
-                    conflicts={conflicts}
-                    onRefresh={loadSchedule}
-                    onOpenInspector={() => setIsInspectorOpen(true)}
-                    onAssignScenePrompt={(dayId) => setPickerDayId(dayId)}
-                    timeline={timelines.get(day.id)}
-                    onFindFixes={(conflict) => setFixRequest({ kind: 'conflict', conflict })}
-                    onFillTime={(dayId) => setFixRequest({ kind: 'fill', dayId })}
-                  />
+              /* Shoot days panel — boxed like the pool, with a tinted track so cards stand out */
+              <div className="bg-background border border-border rounded-2xl p-4 shadow-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border">
+                  <div className="text-xs font-mono font-bold uppercase tracking-wider text-subtle-foreground flex items-center gap-1.5">
+                    <Calendar className="size-3.5 text-amber-600 dark:text-amber-500" />
+                    <span>
+                      Shoot days ({visibleDays.length}
+                      {hideEmptyDays && emptyDayCount > 0 ? ` of ${scheduleData?.shootDays.length || 0}` : ''})
+                    </span>
                   </div>
-                ))}
-              </div>
-              </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {emptyDayCount > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDeleteEmptyDays}
+                          disabled={isDeletingEmpty}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-red-500/40 text-xs text-red-700 dark:text-red-400 hover:bg-red-500/10 cursor-pointer disabled:cursor-wait disabled:opacity-60 transition-colors"
+                        >
+                          {isDeletingEmpty ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                          Delete {emptyDayCount} empty
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHideEmptyDays((v) => !v)}
+                          aria-pressed={hideEmptyDays}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${
+                            hideEmptyDays
+                              ? 'border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                              : 'border-border text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <EyeOff className="size-3.5" />
+                          {hideEmptyDays ? `${emptyDayCount} empty hidden` : `Hide ${emptyDayCount} empty`}
+                        </button>
+                      </>
+                    )}
+                    <div className="flex items-center gap-1" aria-label="Scroll shoot days">
+                      <button
+                        type="button"
+                        onClick={() => scrollDays(-1)}
+                        disabled={dayScroll.atStart}
+                        aria-label="Scroll to earlier days"
+                        title="Earlier days"
+                        className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
+                      >
+                        <ChevronLeft className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scrollDays(1)}
+                        disabled={dayScroll.atEnd}
+                        aria-label="Scroll to later days"
+                        title="Later days"
+                        className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
+                      >
+                        <ChevronRight className="size-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/50 overflow-hidden">
+                  <div
+                    ref={dayTrackRef}
+                    onScroll={updateDayScroll}
+                    className="flex items-start gap-4 overflow-x-auto p-3 pb-4 scrollbar-visible min-h-[320px]"
+                  >
+                    {visibleDays.map((day) => (
+                      <div key={day.id} id={`shoot-day-${day.id}`} className="shrink-0 scroll-mx-4">
+                        <ShootDayColumn
+                          day={day}
+                          conflicts={conflicts}
+                          onRefresh={loadSchedule}
+                          onOpenInspector={() => setIsInspectorOpen(true)}
+                          onAssignScenePrompt={(dayId) => setPickerDayId(dayId)}
+                          timeline={timelines.get(day.id)}
+                          onFindFixes={(conflict) => setFixRequest({ kind: 'conflict', conflict })}
+                          onFillTime={(dayId) => setFixRequest({ kind: 'fill', dayId })}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>

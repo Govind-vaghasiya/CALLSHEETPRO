@@ -176,3 +176,30 @@
 .no-scrollbar {
   scrollbar-width: none;
 }
+
+/* Always-visible scrollbar (macOS hides overlay scrollbars until you scroll, so people can't
+   tell a row scrolls). Styled with theme tokens; works in light and dark mode. */
+/* Standard properties only where ::-webkit-scrollbar isn't supported (Firefox): in Chrome/Safari
+   they would override the styles below and fall back to macOS's auto-hiding overlay bar. */
+@supports not selector(::-webkit-scrollbar) {
+  .scrollbar-visible {
+    scrollbar-width: auto;
+    scrollbar-color: var(--faint) var(--muted);
+  }
+}
+.scrollbar-visible::-webkit-scrollbar {
+  height: 12px;
+  width: 12px;
+}
+.scrollbar-visible::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 9999px;
+}
+.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: var(--faint);
+  border-radius: 9999px;
+  border: 3px solid var(--muted);
+}
+.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
