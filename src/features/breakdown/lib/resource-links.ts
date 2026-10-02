@@ -9,6 +9,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { linkCastElement, migrateLegacyCast, assignCastNumbers } from '@/features/characters/lib/characters'
+import { forEachLimit } from '@/lib/async'
 import type {
   Database,
   ElementConfirmStatus,
@@ -243,21 +244,31 @@ export async function syncProjectLinks(sb: Client, projectId: string) {
     allElements.push(...(inserted || []))
   }
 
-  // 2. Link / unlink
+  // 2. Link / unlink. A fresh script yields hundreds of these, too many to run one by one
+  //    inside a serverless time limit. Elements sharing a name stay in one sequential chain so
+  //    the first creates the character/resource and the rest reuse it; chains run concurrently.
   const linkedElementIds = new Set((requirements || []).map((r) => r.element_id).filter(Boolean))
+  const chains = new Map<string, ElementRow[]>()
   for (const el of allElements) {
     const shouldLink = !!LINKED_RESOURCE_TYPE[el.element_type] && isConfirmedStatus(el.confirm_status)
-    if (shouldLink && el.element_type === 'CAST') {
-      // Cast is linked when it has a character; the actor requirement follows the casting
-      if (!el.character_id) await reconcileElementLink(sb, projectId, el, undefined, cache)
-      continue
-    }
-    if (shouldLink && !linkedElementIds.has(el.id)) {
-      await reconcileElementLink(sb, projectId, el, undefined, cache)
-    } else if (!shouldLink && linkedElementIds.has(el.id)) {
-      await unlinkElement(sb, el.id)
-    }
+    // Cast is linked when it has a character; the actor requirement follows the casting
+    const needsWork =
+      shouldLink && el.element_type === 'CAST'
+        ? !el.character_id
+        : shouldLink !== linkedElementIds.has(el.id)
+    if (!needsWork) continue
+    const key = `${LINKED_RESOURCE_TYPE[el.element_type] ?? el.element_type}:${norm(el.name)}`
+    chains.set(key, [...(chains.get(key) || []), el])
   }
+  await forEachLimit(Array.from(chains.values()), 8, async (chain) => {
+    for (const el of chain) {
+      if (LINKED_RESOURCE_TYPE[el.element_type] && isConfirmedStatus(el.confirm_status)) {
+        await reconcileElementLink(sb, projectId, el, undefined, cache)
+      } else {
+        await unlinkElement(sb, el.id)
+      }
+    }
+  })
 
   await assignCastNumbers(sb, projectId)
   await syncProjectBookings(sb, projectId)

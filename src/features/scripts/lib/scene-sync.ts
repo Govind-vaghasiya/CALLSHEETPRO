@@ -11,6 +11,7 @@ import type { Database, RevisionColor } from '@/types/database'
 import type { ParsedScene } from './parser'
 import { reconcileElementLink, syncProjectLinks } from '@/features/breakdown/lib/resource-links'
 import { extractCharacterCues } from '@/features/characters/lib/character-cues'
+import { forEachLimit } from '@/lib/async'
 
 type Client = SupabaseClient<Database>
 
@@ -69,9 +70,17 @@ export async function syncScenesFromDraft(
   const summary: SceneSyncSummary = { added: 0, changed: 0, omitted: [] }
   const sceneTexts = new Map<string, string>() // scene id → text, for character detection
 
+  // One round trip per scene runs past a serverless time limit on a feature-length script,
+  // so new scenes go in as one insert and updates run concurrently.
+  const inserts: Database['public']['Tables']['scenes']['Insert'][] = []
+  const updates: Array<{ id: string; values: Database['public']['Tables']['scenes']['Update'] }> = []
+  const relocations: Array<{ id: string; from: string | null; to: string | null }> = []
+
   for (let idx = 0; idx < parsed.length; idx++) {
     const p = parsed[idx]
     const key = norm(p.sceneNumber)
+    // scene_number is unique per project; a repeated number in the draft keeps its first scene
+    if (seen.has(key)) continue
     seen.add(key)
     const fields = {
       script_document_id: documentId,
@@ -89,16 +98,14 @@ export async function syncScenesFromDraft(
 
     const prev = byNumber.get(key)
     if (!prev) {
-      const { data: inserted } = await sb.from('scenes').insert({
+      inserts.push({
         project_id: projectId,
         scene_number: p.sceneNumber,
         status: 'DETECTED',
         revision_color: revisionColor,
         is_changed: hadPreviousDraft,
         ...fields,
-      }).select('id').single()
-      if (inserted) sceneTexts.set(inserted.id, p.description || '')
-      summary.added++
+      })
       continue
     }
     sceneTexts.set(prev.id, p.description || '')
@@ -106,17 +113,23 @@ export async function syncScenesFromDraft(
     const changed =
       norm(prev.heading) !== norm(p.heading) || (prev.description || '').trim() !== (p.description || '').trim()
     // Breakdown status is kept; a changed scene is flagged for re-review instead of reset
-    await sb
-      .from('scenes')
-      .update({
-        ...fields,
-        is_changed: changed,
-        revision_color: changed ? revisionColor : prev.revision_color,
-      })
-      .eq('id', prev.id)
+    updates.push({
+      id: prev.id,
+      values: { ...fields, is_changed: changed, revision_color: changed ? revisionColor : prev.revision_color },
+    })
     if (changed) summary.changed++
-    await relinkSceneLocation(sb, projectId, prev.id, prev.location_name, p.locationName)
+    relocations.push({ id: prev.id, from: prev.location_name, to: p.locationName })
   }
+
+  if (inserts.length > 0) {
+    const { data: inserted, error } = await sb.from('scenes').insert(inserts).select('id, description')
+    if (error) throw new Error(`Could not save scenes: ${error.message}`)
+    for (const s of inserted || []) sceneTexts.set(s.id, s.description || '')
+    summary.added = inserted?.length || 0
+  }
+  await forEachLimit(updates, 10, (u) => sb.from('scenes').update(u.values).eq('id', u.id))
+  // Sequential: two scenes moving to the same new location must not both create it
+  for (const r of relocations) await relinkSceneLocation(sb, projectId, r.id, r.from, r.to)
 
   // Scenes not in this draft: keep them (they may be scheduled) and report them
   const omitted = (existing || []).filter((s) => !seen.has(norm(s.scene_number)))
