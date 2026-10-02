@@ -268,7 +268,30 @@ setupNodePdfPolyfills()
  */
 export async function parsePdfBuffer(buffer: Buffer): Promise<ScriptParseResult> {
   setupNodePdfPolyfills()
+
+  // Disable the pdf.worker.mjs fake worker before loading pdf-parse.
+  // On Netlify serverless functions the worker file isn't bundled, causing
+  // "Cannot find module pdf.worker.mjs". Setting workerSrc to an empty
+  // string tells pdfjs-dist to run on the main thread instead.
+  try {
+    const pdfjsDist = require('pdfjs-dist')
+    if (pdfjsDist?.GlobalWorkerOptions) {
+      pdfjsDist.GlobalWorkerOptions.workerSrc = ''
+    }
+  } catch {
+    // pdfjs-dist may not be directly importable; pdf-parse bundles it internally
+  }
+
   const pdfModule = require('pdf-parse')
+
+  // pdf-parse v2 also exposes a GlobalWorkerOptions via its own API
+  if (pdfModule.GlobalWorkerOptions) {
+    pdfModule.GlobalWorkerOptions.workerSrc = ''
+  }
+  if (pdfModule.default?.GlobalWorkerOptions) {
+    pdfModule.default.GlobalWorkerOptions.workerSrc = ''
+  }
+
   const PDFParseClass = pdfModule.PDFParse || pdfModule.default?.PDFParse || pdfModule
 
   let rawPages: Array<{ pageNumber: number; rawText: string }> = []
