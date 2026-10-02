@@ -1,11 +1,16 @@
 'use client'
 
-import React, { useState, useActionState, useTransition } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useModalBehavior } from '@/components/ui/use-modal-behavior'
+import { useFeedback } from '@/components/ui/feedback-provider'
 import {
-  uploadScriptAction,
-  type ScriptActionState,
+  startScriptUploadAction,
+  syncUploadedScenesAction,
+  linkUploadedScriptAction,
+  finishScriptUploadAction,
 } from '@/features/scripts/actions'
+import type { ParsedScene } from '@/features/scripts/lib/parser'
 import {
   REVISION_COLORS,
   getRevisionColorMeta,
@@ -22,7 +27,28 @@ import {
   X,
   Sparkles,
   CheckCircle2,
+  Circle,
+  MinusCircle,
+  RotateCcw,
 } from 'lucide-react'
+
+type StepId = 'upload' | 'scenes' | 'links' | 'finish'
+type StepStatus = 'pending' | 'active' | 'done' | 'error' | 'skipped'
+type StepState = { status: StepStatus; detail?: string }
+
+const STEPS: Array<{ id: StepId; label: string; activeLabel: string }> = [
+  { id: 'upload', label: 'Upload & read script', activeLabel: 'Uploading the file and reading its pages…' },
+  { id: 'scenes', label: 'Update scenes & speaking characters', activeLabel: 'Matching scenes to the previous draft…' },
+  { id: 'links', label: 'Link cast & locations to Cast & Crew', activeLabel: 'Linking breakdown items…' },
+  { id: 'finish', label: 'Update bookings & finish', activeLabel: 'Notifying the team…' },
+]
+
+const initialSteps = (): Record<StepId, StepState> => ({
+  upload: { status: 'pending' },
+  scenes: { status: 'pending' },
+  links: { status: 'pending' },
+  finish: { status: 'pending' },
+})
 
 interface ScriptUploadModalProps {
   projectId: string
@@ -39,20 +65,141 @@ export function ScriptUploadModal({
   suggestedVersion = 1,
   suggestedColor = 'WHITE',
 }: ScriptUploadModalProps) {
-  useModalBehavior(isOpen, onClose)
+  const router = useRouter()
+  const { notify } = useFeedback()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [version, setVersion] = useState<number>(suggestedVersion)
   const [selectedColor, setSelectedColor] = useState<RevisionColor>(suggestedColor)
   const [isCurrent, setIsCurrent] = useState(true)
 
-  const uploadActionWithProject = uploadScriptAction.bind(null, projectId)
-  const [state, formAction, isPending] = useActionState<ScriptActionState, FormData>(
-    uploadActionWithProject,
-    {}
-  )
+  // The upload runs as short server steps (each well inside the host's time limit);
+  // progress is shown between them and a failed step can be retried without re-uploading.
+  const [steps, setSteps] = useState<Record<StepId, StepState>>(initialSteps)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<{ step: StepId; message: string } | null>(null)
+  const [linkProgress, setLinkProgress] = useState<{ done: number; total: number } | null>(null)
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const formDataRef = useRef<FormData | null>(null)
+  const uploadRef = useRef<{ documentId: string; becomesCurrent: boolean; scenes: ParsedScene[] } | null>(null)
+
+  const started = startedAt !== null
+  const handleClose = () => {
+    if (running) return
+    setSteps(initialSteps())
+    setError(null)
+    setLinkProgress(null)
+    setStartedAt(null)
+    uploadRef.current = null
+    onClose()
+  }
+  useModalBehavior(isOpen, handleClose)
+
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [running])
 
   if (!isOpen) return null
+
+  const setStep = (id: StepId, status: StepStatus, detail?: string) =>
+    setSteps((prev) => ({ ...prev, [id]: { status, detail } }))
+
+  const runFrom = async (first: StepId) => {
+    setRunning(true)
+    setError(null)
+    let current: StepId = first
+    const fail = (message: string) => {
+      setStep(current, 'error')
+      setError({ step: current, message })
+    }
+    const order: StepId[] = ['upload', 'scenes', 'links', 'finish']
+    try {
+      for (const id of order.slice(order.indexOf(first))) {
+        // A draft that isn't made current leaves the project's scenes alone
+        if ((id === 'scenes' || id === 'links') && uploadRef.current && !uploadRef.current.becomesCurrent) continue
+        current = id
+        setStep(id, 'active')
+
+        if (id === 'upload') {
+          const res = await startScriptUploadAction(projectId, formDataRef.current!)
+          if ('error' in res) return fail(res.error)
+          uploadRef.current = res
+          setStep('upload', 'done', `${res.totalPages} page${res.totalPages === 1 ? '' : 's'} · ${res.scenes.length} scene${res.scenes.length === 1 ? '' : 's'} found`)
+          if (!res.becomesCurrent) {
+            setStep('scenes', 'skipped', 'Not the current draft, so project scenes are unchanged')
+            setStep('links', 'skipped')
+          }
+        }
+
+        const upload = uploadRef.current!
+
+        if (id === 'scenes') {
+          const res = await syncUploadedScenesAction(projectId, upload.documentId, upload.scenes)
+          if ('error' in res) return fail(res.error)
+          const omitted = res.omitted.length ? ` · ${res.omitted.length} not in this draft` : ''
+          setStep('scenes', 'done', `${res.added} new · ${res.changed} changed${omitted}`)
+        }
+
+        if (id === 'links') {
+          let done = 0
+          let total = 0
+          let stalls = 0
+          for (;;) {
+            const res = await linkUploadedScriptAction(projectId)
+            if ('error' in res) return fail(res.error)
+            done += res.linked
+            total = Math.max(total, done + res.remaining)
+            setLinkProgress({ done, total })
+            if (res.remaining === 0) break
+            stalls = res.linked === 0 ? stalls + 1 : 0
+            if (stalls >= 2) return fail(`${res.remaining} breakdown items could not be linked. Retry, or open the Breakdown to finish linking.`)
+          }
+          setStep('links', 'done', total ? `${total} item${total === 1 ? '' : 's'} linked` : 'Everything was already linked')
+        }
+
+        if (id === 'finish') {
+          const res = await finishScriptUploadAction(projectId, upload.documentId)
+          if (res.error) return fail(res.error)
+          setStep('finish', 'done')
+        }
+      }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'The connection to the server was lost.')
+    } finally {
+      setRunning(false)
+    }
+
+    notify('Script uploaded and processed', 'success')
+    router.refresh()
+    handleCloseAfterSuccess()
+  }
+
+  const handleCloseAfterSuccess = () => {
+    setSteps(initialSteps())
+    setLinkProgress(null)
+    setStartedAt(null)
+    setSelectedFile(null)
+    uploadRef.current = null
+    onClose()
+  }
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!selectedFile || running) return
+    const fd = new FormData(e.currentTarget)
+    fd.set('file', selectedFile) // dropped files never reach the hidden input
+    formDataRef.current = fd
+    setSteps(initialSteps())
+    setLinkProgress(null)
+    setStartedAt(Date.now())
+    setNow(Date.now())
+    void runFrom('upload')
+  }
+
+  const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
@@ -92,8 +239,8 @@ export function ScriptUploadModal({
         {/* Close Button */}
         <button
           type="button"
-          disabled={isPending}
-          onClick={onClose}
+          disabled={running}
+          onClick={handleClose}
           className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-card disabled:opacity-50 cursor-pointer"
           aria-label="Close"
         >
@@ -113,14 +260,94 @@ export function ScriptUploadModal({
           </p>
         </div>
 
-        {state?.error && (
+        {error && (
           <div className="flex items-start gap-3 p-3.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs">
             <AlertCircle className="size-4 shrink-0 mt-0.5" />
-            <span>{state.error}</span>
+            <span>{error.message}</span>
           </div>
         )}
 
-        <form action={formAction} className="space-y-6">
+        {started && (
+          <div className="space-y-4" aria-live="polite">
+            <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card/40">
+              <FileText className="size-5 text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-foreground truncate">{selectedFile?.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  v{version} · {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : ''}
+                </div>
+              </div>
+              <span className="text-xs font-mono text-muted-foreground tabular-nums">{elapsed}s</span>
+            </div>
+
+            <ol className="space-y-3">
+              {STEPS.map((step) => {
+                const st = steps[step.id]
+                const showBar = step.id === 'links' && linkProgress && linkProgress.total > 0 && st.status !== 'skipped'
+                return (
+                  <li key={step.id} className="flex items-start gap-3">
+                    <span className="mt-0.5 shrink-0">
+                      {st.status === 'done' && <CheckCircle2 className="size-4 text-emerald-700 dark:text-emerald-400" />}
+                      {st.status === 'active' && <Loader2 className="size-4 animate-spin text-amber-700 dark:text-amber-400" />}
+                      {st.status === 'error' && <AlertCircle className="size-4 text-red-700 dark:text-red-400" />}
+                      {st.status === 'skipped' && <MinusCircle className="size-4 text-muted-foreground" />}
+                      {st.status === 'pending' && <Circle className="size-4 text-muted-foreground/50" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-sm ${st.status === 'pending' || st.status === 'skipped' ? 'text-muted-foreground' : 'text-foreground font-medium'}`}>
+                        {step.label}
+                      </div>
+                      {(st.detail || st.status === 'active') && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {st.status === 'active'
+                            ? step.id === 'links' && linkProgress
+                              ? `${linkProgress.done} of ${linkProgress.total} linked…`
+                              : step.activeLabel
+                            : st.detail}
+                        </div>
+                      )}
+                      {showBar && (
+                        <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full bg-amber-500 transition-all duration-500"
+                            style={{ width: `${Math.round((linkProgress.done / linkProgress.total) * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
+
+            <div className="border-t border-border/80 pt-4 flex items-center justify-between">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={running}
+                onClick={handleClose}
+                className="border-border text-muted-foreground hover:text-foreground text-xs h-9 cursor-pointer"
+              >
+                Close
+              </Button>
+              {error ? (
+                <Button
+                  type="button"
+                  onClick={() => void runFrom(error.step)}
+                  className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold px-5 text-xs h-9 cursor-pointer"
+                >
+                  <RotateCcw className="size-3.5 mr-1.5" />
+                  Retry {STEPS.find((s) => s.id === error.step)?.label.toLowerCase()}
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground">Keep this window open until it finishes.</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className={started ? 'hidden' : 'space-y-6'}>
           {/* File Dropzone */}
           <div
             onDragEnter={handleDrag}
@@ -142,7 +369,6 @@ export function ScriptUploadModal({
               accept=".pdf,.fdx,.txt,.fountain"
               onChange={handleFileChange}
               className="sr-only"
-              required
             />
             <label htmlFor="file" className="cursor-pointer block">
               {selectedFile ? (
@@ -301,8 +527,7 @@ export function ScriptUploadModal({
               type="button"
               variant="outline"
               size="sm"
-              disabled={isPending}
-              onClick={onClose}
+              onClick={handleClose}
               className="border-border text-muted-foreground hover:text-foreground text-xs h-9 cursor-pointer"
             >
               Cancel
@@ -310,20 +535,11 @@ export function ScriptUploadModal({
 
             <Button
               type="submit"
-              disabled={isPending || !selectedFile}
+              disabled={running || !selectedFile}
               className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold px-5 text-xs h-9 shadow-lg shadow-amber-500/15 cursor-pointer disabled:opacity-50"
             >
-              {isPending ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin mr-1.5" />
-                  Parsing Scenes & Pages...
-                </>
-              ) : (
-                <>
-                  <Upload className="size-3.5 mr-1.5" />
-                  Upload & Ingest Script
-                </>
-              )}
+              <Upload className="size-3.5 mr-1.5" />
+              Upload & Ingest Script
             </Button>
           </div>
         </form>

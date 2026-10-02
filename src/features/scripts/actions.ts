@@ -5,9 +5,10 @@ import { notifyProjectMembers, recordActivity } from '@/features/collaboration/l
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { parseScreenplayBuffer, extractScenesFromPages } from './lib/parser'
-import { describeSync, relinkSceneLocation, syncScenesFromDraft } from './lib/scene-sync'
-import { syncProjectBookings } from '@/features/breakdown/lib/resource-links'
+import { parseScreenplayBuffer, extractScenesFromPages, type ParsedScene } from './lib/parser'
+import { describeSync, relinkSceneLocation, syncScenesFromDraft, type SceneSyncSummary } from './lib/scene-sync'
+import { syncProjectBookings, syncProjectLinks } from '@/features/breakdown/lib/resource-links'
+import { forEachLimit } from '@/lib/async'
 import { parseSlugline } from './lib/slugline'
 import type {
   RevisionColor,
@@ -190,13 +191,21 @@ export async function getScriptPages(scriptId: string): Promise<ScriptPageItem[]
 }
 
 /**
- * Upload screenplay file, extract pages & sluglines, and record draft
+ * Script upload runs as a sequence of short steps driven by the upload dialog
+ * (start → sync scenes → link, repeated until done → finish). Each step stays well inside a
+ * serverless function's time limit, and the dialog shows real progress between them.
  */
-export async function uploadScriptAction(
-  projectId: string,
-  _prevState: ScriptActionState | null,
-  formData: FormData
-): Promise<ScriptActionState> {
+export type ScriptUploadStart =
+  | { error: string }
+  | {
+      documentId: string
+      becomesCurrent: boolean
+      totalPages: number
+      scenes: ParsedScene[]
+    }
+
+/** Step 1: store the file, parse it, and save the draft with its pages. */
+export async function startScriptUploadAction(projectId: string, formData: FormData): Promise<ScriptUploadStart> {
   const supabase = await createClient()
   const {
     data: { user },
@@ -299,50 +308,109 @@ export async function uploadScriptAction(
       return { error: `Database error: ${docError?.message || 'Failed to save script'}` }
     }
 
-    // 6. Bulk insert script_pages (in batches of 50)
-    if (parseResult.pages.length > 0) {
-      const pageRows = parseResult.pages.map((p) => ({
-        script_document_id: documentId,
-        page_number: p.pageNumber,
-        raw_text: (p.rawText || '').replace(/\0/g, ''),
-      }))
+    // 6. Insert script_pages in batches of 50, a few at a time
+    const pageRows = parseResult.pages.map((p) => ({
+      script_document_id: documentId,
+      page_number: p.pageNumber,
+      raw_text: (p.rawText || '').replace(/\0/g, ''),
+    }))
+    const pageBatches: (typeof pageRows)[] = []
+    for (let i = 0; i < pageRows.length; i += 50) pageBatches.push(pageRows.slice(i, i + 50))
+    let pageError: string | null = null
+    await forEachLimit(pageBatches, 4, async (batch) => {
+      const { error } = await admin.from('script_pages').insert(batch)
+      if (error) pageError = error.message
+    })
+    if (pageError) return { error: `Could not save script pages: ${pageError}` }
 
-      for (let i = 0; i < pageRows.length; i += 50) {
-        const batch = pageRows.slice(i, i + 50)
-        const { error: pageInsertError } = await admin.from('script_pages').insert(batch)
-        if (pageInsertError) {
-          console.error('Error inserting script_pages batch:', pageInsertError)
-        }
-      }
+    return {
+      documentId,
+      becomesCurrent,
+      totalPages: parseResult.totalPages,
+      scenes: becomesCurrent ? parseResult.scenes : [],
     }
+  } catch (err: any) {
+    console.error('Unhandled script upload error:', err)
+    return { error: err?.message || 'An unexpected error occurred during screenplay processing.' }
+  }
+}
 
-    // 7. Update the project's scenes in place (ids, breakdown, and schedule placement survive)
-    if (becomesCurrent && parseResult.scenes.length > 0) {
-      const summary = await syncScenesFromDraft(supabase, projectId, documentId, parseResult.scenes, revisionColor)
-      await supabase
-        .from('script_documents')
-        .update({ revision_notes: [revisionNotes, describeSync(summary)].filter(Boolean).join('\n') })
-        .eq('id', documentId)
-    }
+/** Step 2: update the project's scenes in place (ids, breakdown, and schedule placement survive). */
+export async function syncUploadedScenesAction(
+  projectId: string,
+  documentId: string,
+  scenes: ParsedScene[]
+): Promise<{ error: string } | SceneSyncSummary> {
+  try {
+    const supabase = await createClient()
+    const { data: doc } = await supabase
+      .from('script_documents')
+      .select('revision_color, revision_notes')
+      .eq('id', documentId)
+      .eq('project_id', projectId)
+      .single()
+    if (!doc) return { error: 'The uploaded draft could not be found.' }
 
-    await recordActivity(projectId, 'SCRIPT_UPLOADED', `Uploaded ${fileName} (v${version})`, becomesCurrent ? 'Now the current draft' : undefined)
+    const summary = await syncScenesFromDraft(supabase, projectId, documentId, scenes, doc.revision_color, {
+      linkResources: false,
+    })
+    await supabase
+      .from('script_documents')
+      .update({ revision_notes: [doc.revision_notes, describeSync(summary)].filter(Boolean).join('\n') })
+      .eq('id', documentId)
+    return summary
+  } catch (err: any) {
+    console.error('Scene sync error:', err)
+    return { error: err?.message || 'Could not update the scenes from this draft.' }
+  }
+}
+
+/**
+ * Step 3: link breakdown items to Cast & Crew for up to a few seconds. Returns how many items
+ * are left; the dialog calls again until none remain (the last call also rebuilds bookings).
+ */
+export async function linkUploadedScriptAction(
+  projectId: string
+): Promise<{ error: string } | { linked: number; remaining: number }> {
+  try {
+    const supabase = await createClient()
+    return await syncProjectLinks(supabase, projectId, { budgetMs: 4000 })
+  } catch (err: any) {
+    console.error('Breakdown linking error:', err)
+    return { error: err?.message || 'Could not link cast and locations.' }
+  }
+}
+
+/** Step 4: log the upload, notify the team, and refresh the pages that show scripts. */
+export async function finishScriptUploadAction(projectId: string, documentId: string): Promise<{ error?: string }> {
+  try {
+    const supabase = await createClient()
+    const { data: doc } = await supabase
+      .from('script_documents')
+      .select('file_name, version, is_current')
+      .eq('id', documentId)
+      .single()
+    if (!doc) return { error: 'The uploaded draft could not be found.' }
+
+    await recordActivity(projectId, 'SCRIPT_UPLOADED', `Uploaded ${doc.file_name} (v${doc.version})`, doc.is_current ? 'Now the current draft' : undefined)
     await notifyProjectMembers(
       projectId,
       'SCRIPT_REVISION_UPLOADED',
-      `New script draft: ${fileName}`,
-      `Version ${version}${becomesCurrent ? ' is now the current draft.' : '.'}`,
+      `New script draft: ${doc.file_name}`,
+      `Version ${doc.version}${doc.is_current ? ' is now the current draft.' : '.'}`,
       `/projects/${projectId}/scripts`
     )
 
     revalidatePath(`/projects/${projectId}`)
     revalidatePath(`/projects/${projectId}/scripts`)
     revalidatePath(`/projects/${projectId}/scripts/${documentId}`)
+    revalidatePath(`/projects/${projectId}/breakdown`)
+    revalidatePath(`/projects/${projectId}/schedule`)
+    return {}
   } catch (err: any) {
-    console.error('Unhandled script upload error:', err)
-    return { error: err?.message || 'An unexpected error occurred during screenplay processing.' }
+    console.error('Finish script upload error:', err)
+    return { error: err?.message || 'The script was saved, but finishing the upload failed.' }
   }
-
-  redirect(`/projects/${projectId}/scripts`)
 }
 
 /**

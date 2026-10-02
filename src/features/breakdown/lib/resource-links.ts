@@ -209,10 +209,15 @@ export async function getResourceSceneUsage(sb: Client, resourceId: string) {
  *  - links on unconfirmed/removed elements are dropped,
  *  - shoot-day bookings are rebuilt from the links.
  */
-export async function syncProjectLinks(sb: Client, projectId: string) {
+export async function syncProjectLinks(
+  sb: Client,
+  projectId: string,
+  options: { budgetMs?: number } = {}
+): Promise<{ linked: number; remaining: number }> {
+  const startedAt = Date.now()
   const { data: scenes } = await sb.from('scenes').select('id, location_name').eq('project_id', projectId)
   const sceneIds = (scenes || []).map((s) => s.id)
-  if (sceneIds.length === 0) return
+  if (sceneIds.length === 0) return { linked: 0, remaining: 0 }
 
   // Upgrade old "actor + character in one entry" cast data to characters (no-op once done)
   await migrateLegacyCast(sb, projectId)
@@ -260,18 +265,29 @@ export async function syncProjectLinks(sb: Client, projectId: string) {
     const key = `${LINKED_RESOURCE_TYPE[el.element_type] ?? el.element_type}:${norm(el.name)}`
     chains.set(key, [...(chains.get(key) || []), el])
   }
-  await forEachLimit(Array.from(chains.values()), 8, async (chain) => {
+  //    With a time budget (script upload on a serverless host), stop starting new chains once it
+  //    is spent and report what is left; the caller calls again until nothing remains.
+  const pending = Array.from(chains.values())
+  const total = pending.reduce((n, c) => n + c.length, 0)
+  let linked = 0
+  const overBudget = () => options.budgetMs !== undefined && Date.now() - startedAt > options.budgetMs
+  await forEachLimit(pending, 8, async (chain) => {
     for (const el of chain) {
+      // Unfinished items stay unlinked, so the next call picks them up again
+      if (overBudget()) return
       if (LINKED_RESOURCE_TYPE[el.element_type] && isConfirmedStatus(el.confirm_status)) {
         await reconcileElementLink(sb, projectId, el, undefined, cache)
       } else {
         await unlinkElement(sb, el.id)
       }
+      linked++
     }
   })
+  if (linked < total) return { linked, remaining: total - linked }
 
   await assignCastNumbers(sb, projectId)
   await syncProjectBookings(sb, projectId)
+  return { linked, remaining: 0 }
 }
 
 /**

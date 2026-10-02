@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { normalizeCharacterName } from './character-cues'
+import { forEachLimit } from '@/lib/async'
 
 type Client = SupabaseClient<Database>
 type CharacterRow = Database['public']['Tables']['characters']['Row']
@@ -188,9 +189,8 @@ export async function assignCastNumbers(sb: Client, projectId: string) {
     const sb2 = stats.get(b.id) || { count: 0, first: Infinity }
     return sb2.count - sa.count || sa.first - sb2.first || a.name.localeCompare(b.name)
   })
-  for (const c of ordered) {
-    await sb.from('characters').update({ cast_number: next++ }).eq('id', c.id)
-  }
+  const numbered = ordered.map((c) => ({ id: c.id, cast_number: next++ }))
+  await forEachLimit(numbered, 10, (c) => sb.from('characters').update({ cast_number: c.cast_number }).eq('id', c.id))
 }
 
 /**

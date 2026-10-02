@@ -61,7 +61,9 @@ export async function syncScenesFromDraft(
   projectId: string,
   documentId: string,
   parsed: ParsedScene[],
-  revisionColor: RevisionColor
+  revisionColor: RevisionColor,
+  /** false leaves Cast & Crew linking to the caller (script upload runs it in time-boxed steps) */
+  options: { linkResources?: boolean } = {}
 ): Promise<SceneSyncSummary> {
   const { data: existing } = await sb.from('scenes').select('*').eq('project_id', projectId)
   const byNumber = new Map((existing || []).map((s) => [norm(s.scene_number), s]))
@@ -146,7 +148,7 @@ export async function syncScenesFromDraft(
   }
 
   await addSpeakingCharacters(sb, sceneTexts)
-  await syncProjectLinks(sb, projectId)
+  if (options.linkResources !== false) await syncProjectLinks(sb, projectId)
   return summary
 }
 
