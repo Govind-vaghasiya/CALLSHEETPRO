@@ -10,6 +10,8 @@ import { saveScheduleVersionAction } from '@/features/versioning/actions'
 import { logActivityAction } from '@/features/collaboration/actions'
 import { cleanLocationName, locationSite } from './location-key'
 import type { DayPart, PlannerScene, PlanResult } from './auto-schedule'
+import type { ProductionCalendar } from './production-calendar'
+import { loadProductionCalendar, renumberDaysByDate } from './production-calendar-run'
 
 type SceneRow = Database['public']['Tables']['scenes']['Row']
 
@@ -34,6 +36,8 @@ export interface AutoScheduleContext {
   autoDayIds: string[]
   /** Shooting has started — day numbers are fixed, new days are numbered after the last one */
   numbersFixed: boolean
+  /** Work week + holidays from the production calendar */
+  calendar: ProductionCalendar
 }
 
 /** Project settings, script length calibration, and which days are safe to remove. */
@@ -50,6 +54,7 @@ export async function loadAutoScheduleContext(projectId: string, schedule: Proje
     sb.from('script_documents').select('id').eq('project_id', projectId).eq('is_current', true).limit(1),
   ])
 
+  const calendar = await loadProductionCalendar(sb, projectId)
   let charsPerPage = 1500
   if (docs?.[0]) {
     const { data: pages } = await sb.from('script_pages').select('raw_text').eq('script_document_id', docs[0].id)
@@ -71,6 +76,7 @@ export async function loadAutoScheduleContext(projectId: string, schedule: Proje
     emptyDayIds: schedule.shootDays.filter((d) => d.scenes.length === 0 && removable(d)).map((d) => d.id),
     autoDayIds: schedule.shootDays.filter((d) => d.scenes.length > 0 && isAutoDay(d) && removable(d)).map((d) => d.id),
     numbersFixed: schedule.shootDays.some((d) => d.status === 'IN_PROGRESS' || d.status === 'COMPLETED'),
+    calendar: { workDays: calendar.workDays, holidays: calendar.holidays },
   }
 }
 
@@ -166,15 +172,6 @@ export function planAsShootDays(
       totalEstimatedMinutes: scenes.reduce((m, s) => m + s.estimatedMinutes, 0),
     } as ShootDayWithScenes
   })
-}
-
-/** Day 1, 2, 3 … in date order (callers skip this once shooting has started). */
-async function renumberDaysByDate(sb: ReturnType<typeof createClient>, projectId: string) {
-  const { data: all } = await sb.from('shoot_days').select('id, day_number').eq('project_id', projectId).order('shoot_date')
-  const changes = (all || []).map((d, i) => ({ id: d.id, n: i + 1, old: d.day_number })).filter((d) => d.n !== d.old)
-  for (let i = 0; i < changes.length; i += 20) {
-    await Promise.all(changes.slice(i, i + 20).map((c) => sb.from('shoot_days').update({ day_number: c.n }).eq('id', c.id)))
-  }
 }
 
 /**

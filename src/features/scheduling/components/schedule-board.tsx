@@ -52,6 +52,9 @@ import { createClient } from '@/lib/supabase/client'
 import { AssignScenePicker } from './assign-scene-picker'
 import { useFeedback } from '@/components/ui/feedback-provider'
 import { AutoScheduleModal } from './auto-schedule-modal'
+import { DayDateModal, type DateRequest } from './day-date-modal'
+import { DEFAULT_CALENDAR, type ProductionCalendar } from '../lib/production-calendar'
+import { isFixedDay, loadProductionCalendar, loadPublishedCallSheetDates } from '../lib/production-calendar-run'
 import { loadAutoScheduleContext, removeEmptyDays } from '../lib/auto-schedule-run'
 import { ConflictInspectorModal } from './conflict-inspector-modal'
 import { ScheduleVersionSwitcher } from '@/features/versioning/components/version-switcher'
@@ -381,6 +384,10 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
   const [isCreatingDay, setIsCreatingDay] = useState(false)
   const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false)
   const [isDeletingEmpty, setIsDeletingEmpty] = useState(false)
+  // Production calendar (work week, holidays) and published call sheet dates, for re-dating days
+  const [calendar, setCalendar] = useState<ProductionCalendar>(DEFAULT_CALENDAR)
+  const [publishedSheets, setPublishedSheets] = useState<Map<string, string | null>>(new Map())
+  const [dateRequest, setDateRequest] = useState<DateRequest | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(false)
   const [isAiModalOpen, setIsAiModalOpen] = useState(false)
   const [isProposalsModalOpen, setIsProposalsModalOpen] = useState(false)
@@ -436,6 +443,8 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
   const loadSchedule = async () => {
     // Breakdown text (cast, props, tags, notes) so search can find anything in a scene
     loadSceneSearchIndex(createClient(), projectId).then(setSearchIndex)
+    loadProductionCalendar(createClient(), projectId).then(setCalendar)
+    loadPublishedCallSheetDates(createClient(), projectId).then(setPublishedSheets)
     setIsLoading(true)
     const res = await getProjectScheduleAction(projectId)
     setScheduleData(res)
@@ -1048,6 +1057,10 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
                           timeline={timelines.get(day.id)}
                           onFindFixes={(conflict) => setFixRequest({ kind: 'conflict', conflict })}
                           onFillTime={(dayId) => setFixRequest({ kind: 'fill', dayId })}
+                          onEditDate={(dayId) => setDateRequest({ kind: 'date', dayId })}
+                          onInsertDayOff={(dayId) => setDateRequest({ kind: 'dayoff', dayId })}
+                          dateFixed={isFixedDay(day)}
+                          callSheetStale={publishedSheets.has(day.id) && !!publishedSheets.get(day.id) && publishedSheets.get(day.id) !== day.shoot_date}
                         />
                       </div>
                     ))}
@@ -1098,6 +1111,20 @@ export function ScheduleBoard({ projectId, scenes }: ScheduleBoardProps) {
         currency={constraints.currency}
         onApplied={loadSchedule}
       />
+
+      {dateRequest && scheduleData && (
+        <DayDateModal
+          key={`${dateRequest.kind}-${dateRequest.dayId}`}
+          request={dateRequest}
+          onClose={() => setDateRequest(null)}
+          projectId={projectId}
+          schedule={scheduleData}
+          calendar={calendar}
+          constraints={constraints}
+          publishedSheets={publishedSheets}
+          onApplied={loadSchedule}
+        />
+      )}
 
       {/* Mounted only while open, so every opening starts from fresh options */}
       {isAutoScheduleOpen && (

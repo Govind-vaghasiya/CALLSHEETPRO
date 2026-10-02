@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
+import Link from 'next/link'
 import type { DayTimeline } from '../lib/day-timeline'
 import { minutesToLabel } from '../lib/time'
 import { logActivityAction } from '@/features/collaboration/actions'
@@ -31,6 +32,8 @@ import {
   Layers,
   AlertTriangle,
   Sparkles,
+  CalendarPlus,
+  FileWarning,
 } from 'lucide-react'
 
 interface ShootDayColumnProps {
@@ -45,6 +48,14 @@ interface ShootDayColumnProps {
   onFindFixes?: (conflict: ScheduleConflict) => void
   /** Open "use free time" suggestions for this day */
   onFillTime?: (dayId: string) => void
+  /** Change this day's date (push / move only) */
+  onEditDate?: (dayId: string) => void
+  /** Insert a day off after this day (later days push one working day) */
+  onInsertDayOff?: (dayId: string) => void
+  /** Shot, shooting, cancelled or locked: the date can't change */
+  dateFixed?: boolean
+  /** The published call sheet shows a different date than this day now has */
+  callSheetStale?: boolean
 }
 
 export function ShootDayColumn({
@@ -56,6 +67,10 @@ export function ShootDayColumn({
   timeline,
   onFindFixes,
   onFillTime,
+  onEditDate,
+  onInsertDayOff,
+  dateFixed = false,
+  callSheetStale = false,
 }: ShootDayColumnProps) {
   const { confirm, notify } = useFeedback()
   const [isDeleting, setIsDeleting] = useState(false)
@@ -213,6 +228,17 @@ export function ShootDayColumn({
           </div>
 
           <div className="flex items-center gap-1">
+            {onInsertDayOff && (
+              <button
+                type="button"
+                onClick={() => onInsertDayOff(day.id)}
+                className="p-1.5 text-faint hover:text-amber-700 dark:hover:text-amber-400 transition-colors cursor-pointer"
+                title="Insert a day off after this day (later days move one working day)"
+                aria-label="Insert a day off after this day"
+              >
+                <CalendarPlus className="size-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={handleToggleLock}
@@ -240,16 +266,22 @@ export function ShootDayColumn({
 
         {/* Date & Call Time Inputs */}
         <div className="flex items-center justify-between gap-2 text-xs font-mono text-muted-foreground pt-1 border-t border-border/60">
-          <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onEditDate?.(day.id)}
+            disabled={!onEditDate || dateFixed}
+            className="group flex items-center gap-1.5 -ml-1 px-1 py-0.5 rounded border border-transparent enabled:hover:border-amber-500/50 enabled:hover:bg-amber-500/10 enabled:hover:text-foreground enabled:cursor-pointer disabled:cursor-default transition-colors"
+            title={dateFixed ? 'Shot, shooting or locked — unlock the day to change its date' : 'Change date (push later days or move only this day)'}
+          >
             <Calendar className="size-3 text-amber-600 dark:text-amber-500" />
-            <span>
+            <span className="underline decoration-dotted decoration-border underline-offset-2 group-disabled:no-underline">
               {new Date(`${day.shoot_date}T00:00:00`).toLocaleDateString(undefined, {
                 weekday: 'short',
                 day: 'numeric',
                 month: 'short',
               })}
             </span>
-          </div>
+          </button>
 
           <div className="flex items-center gap-1.5">
             <label className="flex items-center gap-1" title="Crew call (set by the AD)">
@@ -276,6 +308,17 @@ export function ShootDayColumn({
             </label>
           </div>
         </div>
+
+        {callSheetStale && (
+          <Link
+            href={`/projects/${day.project_id}/callsheets`}
+            className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+            title="The crew has a call sheet with the old date"
+          >
+            <FileWarning className="size-3.5" />
+            Call sheet shows the old date — republish
+          </Link>
+        )}
 
         {/* Day Summary Stats (Pages & Hours) */}
         <div className="flex items-center justify-between text-[11px] font-mono font-bold bg-background p-2 rounded-lg border border-border/80">

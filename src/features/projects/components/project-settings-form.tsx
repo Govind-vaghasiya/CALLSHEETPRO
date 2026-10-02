@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { DeleteConfirmModal } from '@/components/ui/delete-confirm-modal'
 import { UnionRulesForm } from './union-rules-form'
+import { ProductionCalendarForm } from './production-calendar-form'
 
 interface ProjectSettingsFormProps {
   project: {
@@ -356,6 +357,9 @@ export function ProjectSettingsForm({
           </CardFooter>
         </form>
       </Card>
+
+      {/* Production calendar: work week + holidays (drives date pushes and auto-scheduling) */}
+      <ProductionCalendarForm projectId={project.id} />
 
       {/* Union Rules & Labor Compliance Engine */}
       <UnionRulesForm

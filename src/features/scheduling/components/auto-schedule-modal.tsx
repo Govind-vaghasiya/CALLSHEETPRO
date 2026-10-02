@@ -57,6 +57,8 @@ export function AutoScheduleModal({ isOpen, onClose, projectId, schedule, constr
       .then((c) => {
         if (!live) return
         setCtx(c)
+        // Days off start from the production calendar's work week
+        setDaysOff([0, 1, 2, 3, 4, 5, 6].filter((d) => !c.calendar.workDays.includes(d)))
         setLoadError(null)
       })
       .catch(() => live && setLoadError('Could not load the project settings. Please try again.'))
@@ -103,7 +105,8 @@ export function AutoScheduleModal({ isOpen, onClose, projectId, schedule, constr
       maxMovesPerDay: maxMoves,
       maxShootMinutes: ctx.maxShootMinutes,
       companyMoveMinutes: ctx.companyMoveMinutes,
-      usedDates: new Set(keptDays.map((d) => d.shoot_date)),
+      // Holidays in the production calendar are never shoot days
+      usedDates: new Set([...keptDays.map((d) => d.shoot_date), ...ctx.calendar.holidays.map((h) => h.date)]),
       isBlockedAllDay: allDayBlocker(constraints),
       shootAfter: constraints.shootAfter,
     })
