@@ -269,30 +269,17 @@ setupNodePdfPolyfills()
 export async function parsePdfBuffer(buffer: Buffer): Promise<ScriptParseResult> {
   setupNodePdfPolyfills()
 
-  // Disable the pdf.worker.mjs fake worker before loading pdf-parse.
-  // On Netlify serverless functions the worker file isn't bundled, causing
-  // "Cannot find module pdf.worker.mjs". Setting workerSrc to an empty
-  // string tells pdfjs-dist to run on the main thread instead.
-  try {
-    const pdfjsDist = require('pdfjs-dist')
-    if (pdfjsDist?.GlobalWorkerOptions) {
-      pdfjsDist.GlobalWorkerOptions.workerSrc = ''
-    }
-  } catch {
-    // pdfjs-dist may not be directly importable; pdf-parse bundles it internally
-  }
-
   const pdfModule = require('pdf-parse')
-
-  // pdf-parse v2 also exposes a GlobalWorkerOptions via its own API
-  if (pdfModule.GlobalWorkerOptions) {
-    pdfModule.GlobalWorkerOptions.workerSrc = ''
-  }
-  if (pdfModule.default?.GlobalWorkerOptions) {
-    pdfModule.default.GlobalWorkerOptions.workerSrc = ''
-  }
-
   const PDFParseClass = pdfModule.PDFParse || pdfModule.default?.PDFParse || pdfModule
+
+  // pdfjs loads its worker from pdf.worker.mjs next to pdf-parse's entry file, which
+  // Netlify's function bundle leaves out ("Setting up fake worker failed: Cannot find
+  // module .../pdf.worker.mjs"). Hand it the worker inlined as a data: URL instead,
+  // the setup pdf-parse documents for serverless hosts.
+  if (typeof PDFParseClass?.setWorker === 'function') {
+    const { getData } = require('pdf-parse/worker')
+    PDFParseClass.setWorker(getData())
+  }
 
   let rawPages: Array<{ pageNumber: number; rawText: string }> = []
   let totalPages = 1
