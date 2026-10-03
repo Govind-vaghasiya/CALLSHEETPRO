@@ -27,6 +27,7 @@ export default async function ProjectBreakdownPage({
     <div className="flex-1 w-full max-w-full">
       <BreakdownHub
         projectId={id}
+        projectName={project.name}
         scenes={scenes}
         initialSceneId={initialSceneId}
       />

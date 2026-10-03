@@ -11,9 +11,13 @@ import type { IntExt, TimeOfDay } from '@/types/database'
  */
 export function parseSlugline(line: string): {
   explicitNum?: string
+  /** The slugline without the scene numbers printed in the margins */
+  heading: string
   intExt: IntExt
   locationName: string
   timeOfDay: TimeOfDay
+  /** Time of day as written ("EARLY MORNING", "PRE DAWN"); null when the slugline has none */
+  timeLabel: string | null
 } | null {
   const trimmed = line.trim()
   if (!trimmed || trimmed.length > 180) return null
@@ -25,7 +29,7 @@ export function parseSlugline(line: string): {
   if (!prefixMatch) return null
 
   const prefix = prefixMatch[3].toUpperCase()
-  let rest = prefixMatch[4].replace(/[\t\u00a0]+/g, ' ').replace(/\(\s*PART\s+[A-Z0-9]+\s*\)/gi, ' ').trim()
+  let rest = prefixMatch[4].replace(/[\t\u00a0]+/g, ' ').trim()
 
   // Scene number printed in the right margin too ("… NIGHT 14 14" / "… 24A 24A"): not part of the location.
   // Only a repeated token (or the left-margin number) is removed, so "ROUTE 66" stays intact. Scene
@@ -38,17 +42,20 @@ export function parseSlugline(line: string): {
     if (same && same[1].toUpperCase() === (prefixMatch[1] || prefixMatch[2]).toUpperCase()) rest = rest.slice(0, same.index).trim()
   }
   const explicitNum = prefixMatch[1] || prefixMatch[2]
+  const heading = `${prefixMatch[3].toUpperCase()} ${rest}`.replace(/\s+/g, ' ').trim()
+  rest = rest.replace(/\(\s*PART\s+[A-Z0-9]+\s*\)/gi, ' ').trim()
 
-  // Look for time of day indicator anywhere near the end (after dash, period, comma, or space)
+  // Look for time of day indicator anywhere near the end (after dash, period, comma, or space).
+  // A qualifier in front ("EARLY MORNING", "PRE DAWN", "LATE NIGHT") belongs to the time, not the location.
   const timeMatch = rest.match(
-    /[\s\.\-,]+(DAY|NIGHT|DAWN|DUSK|MORNING|AFTERNOON|EVENING|LATER|CONTINUOUS|MOMENTS\s+LATER|SAME\s+TIME|SUNSET|SUNRISE|MAGIC\s+HOUR)\b/i
+    /[\s\.\-,]+((?:(?:EARLY|LATE|PRE|MID)[\s\-]*)?(DAY|NIGHT|DAWN|DUSK|MORNING|AFTERNOON|EVENING|LATER|CONTINUOUS|MOMENTS\s+LATER|SAME\s+TIME|SUNSET|SUNRISE|MAGIC\s+HOUR))\b/i
   )
 
   let rawLoc = rest
   let timeOfDay: TimeOfDay = 'DAY'
 
   if (timeMatch) {
-    const matchedTime = timeMatch[1].toUpperCase().trim()
+    const matchedTime = timeMatch[2].toUpperCase().trim()
     if (matchedTime.includes('NIGHT') || matchedTime.includes('EVENING')) timeOfDay = 'NIGHT'
     else if (
       matchedTime.includes('DAWN') ||
@@ -81,5 +88,7 @@ export function parseSlugline(line: string): {
   else if (prefix.startsWith('EXT')) intExt = 'EXT'
   else intExt = 'INT'
 
-  return { explicitNum, intExt, locationName, timeOfDay }
+  const timeLabel = timeMatch ? timeMatch[1].toUpperCase().replace(/[\s\-]+/g, ' ').trim() : null
+
+  return { explicitNum, heading, intExt, locationName, timeOfDay, timeLabel }
 }

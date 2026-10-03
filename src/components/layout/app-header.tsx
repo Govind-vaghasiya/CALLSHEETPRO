@@ -9,6 +9,7 @@ import { switchOrganizationAction } from '@/features/organizations/actions'
 import { useFeedback } from '@/components/ui/feedback-provider'
 import { ThemeSegmentedControl, ThemeToggleButton } from '@/components/theme/theme-toggle'
 import {
+  Settings,
   Clapperboard,
   Building2,
   ChevronDown,
@@ -209,6 +210,15 @@ export function AppHeader({ user, organizations, activeOrgId }: AppHeaderProps) 
                   })}
                 </div>
                 <div className="pt-2 mt-1 border-t border-border">
+                  <Link
+                    href="/org/settings"
+                    role="menuitem"
+                    onClick={() => setIsOrgMenuOpen(false)}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Settings className="size-4" />
+                    Organization settings
+                  </Link>
                   <Link
                     href="/org/new"
                     role="menuitem"

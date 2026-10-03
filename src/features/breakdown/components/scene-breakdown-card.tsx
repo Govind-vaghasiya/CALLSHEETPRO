@@ -12,6 +12,7 @@ import {
   deleteSceneElementAction,
   autoExtractSceneElementsAction,
   confirmAllSceneElementsAction,
+  saveSceneOneLinerAction,
   addSceneTagAction,
   deleteSceneTagAction,
   getLinkableResourcesAction,
@@ -19,6 +20,8 @@ import {
   isLinkableElementType,
 } from '../actions'
 import { breakdownLabel, UNCAST_ACTOR_NAME } from '../lib/resource-links'
+import { draftOneLinersAction } from '../ai-actions'
+import { cleanSceneHeading, formatEighths, sceneEighths, sceneTimeLabel } from '../lib/one-liners'
 import type { Database } from '@/types/database'
 import type { SceneElementType, ElementConfirmStatus, SceneTagType } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -53,6 +56,8 @@ interface SceneBreakdownCardProps {
   data: SceneBreakdownData
   projectId: string
   onRefresh: () => void
+  /** A one-liner was saved or drafted (keeps the scene list in step without a reload) */
+  onSynopsisChange?: (sceneId: string, synopsis: string | null, source: 'AI' | 'USER' | null) => void
 }
 
 const ELEMENT_TYPE_CONFIG: Record<
@@ -94,9 +99,63 @@ const CATEGORY_KEYS: SceneElementType[] = [
   'OTHER',
 ]
 
-export function SceneBreakdownCard({ data, projectId, onRefresh }: SceneBreakdownCardProps) {
+export function SceneBreakdownCard({ data, projectId, onRefresh, onSynopsisChange }: SceneBreakdownCardProps) {
   const { scene, elements, tags, links } = data
   const { notify } = useFeedback()
+
+  // One-liner: saved on blur / Enter; AI can draft it on request
+  const [synopsis, setSynopsis] = useState(scene.synopsis || '')
+  const [savedSynopsis, setSavedSynopsis] = useState(scene.synopsis || '') // to skip no-op saves
+  const [synopsisSource, setSynopsisSource] = useState(scene.synopsis_source)
+  const [isSavingSynopsis, setIsSavingSynopsis] = useState(false)
+  const [isDraftingSynopsis, setIsDraftingSynopsis] = useState(false)
+  // Another scene (or fresh data for this one) resets the editor
+  const sceneKey = `${scene.id}|${scene.synopsis ?? ''}|${scene.synopsis_source ?? ''}`
+  const [loadedKey, setLoadedKey] = useState(sceneKey)
+  if (sceneKey !== loadedKey) {
+    setLoadedKey(sceneKey)
+    setSynopsis(scene.synopsis || '')
+    setSavedSynopsis(scene.synopsis || '')
+    setSynopsisSource(scene.synopsis_source)
+  }
+
+  const saveSynopsis = async () => {
+    const text = synopsis.replace(/\s+/g, ' ').trim()
+    // Only a real edit saves (and marks an AI draft as the user's own)
+    if (text === savedSynopsis.trim()) return
+    setIsSavingSynopsis(true)
+    const res = await saveSceneOneLinerAction(scene.id, text)
+    setIsSavingSynopsis(false)
+    if (!res.success) {
+      notify(res.error || 'Could not save the one-liner', 'error')
+      return
+    }
+    setSavedSynopsis(text)
+    setSynopsis(text)
+    setSynopsisSource(text ? 'USER' : null)
+    onSynopsisChange?.(scene.id, text || null, text ? 'USER' : null)
+  }
+
+  const draftSynopsis = async () => {
+    setIsDraftingSynopsis(true)
+    try {
+      const res = await draftOneLinersAction(projectId, [scene.id], 'force')
+      const draft = res.drafted[0]
+      if (draft) {
+        setSavedSynopsis(draft.synopsis)
+        setSynopsis(draft.synopsis)
+        setSynopsisSource('AI')
+        onSynopsisChange?.(scene.id, draft.synopsis, 'AI')
+      }
+      if (res.error) notify(res.error, 'error')
+      else if (!draft) notify('The AI did not return a one-liner for this scene. Try again.', 'error')
+    } catch {
+      notify('Could not reach the server. Check your connection and try again.', 'error')
+    } finally {
+      setIsDraftingSynopsis(false)
+    }
+  }
+  const { eighths, estimated: eighthsEstimated } = sceneEighths(scene)
 
   const [isExtracting, setIsExtracting] = useState(false)
   const [isConfirmingAll, setIsConfirmingAll] = useState(false)
@@ -261,9 +320,9 @@ export function SceneBreakdownCard({ data, projectId, onRefresh }: SceneBreakdow
                 {scene.int_ext}
               </Badge>
             )}
-            {scene.time_of_day && (
-              <Badge variant="outline" className="border-border-strong text-subtle-foreground font-mono text-[10px]">
-                {scene.time_of_day}
+            {sceneTimeLabel(scene) && (
+              <Badge variant="outline" className="border-border-strong text-subtle-foreground font-mono text-[10px] uppercase">
+                {sceneTimeLabel(scene)}
               </Badge>
             )}
             <Badge
@@ -279,12 +338,15 @@ export function SceneBreakdownCard({ data, projectId, onRefresh }: SceneBreakdow
           </div>
 
           <h2 className="text-base font-bold text-foreground font-mono uppercase tracking-wide">
-            {scene.heading || 'UNTITLED SCENE'}
+            {cleanSceneHeading(scene.heading) || 'UNTITLED SCENE'}
           </h2>
 
-          <div className="flex items-center gap-4 text-xs text-muted-foreground font-mono">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground font-mono">
             <span>Location: <strong className="text-foreground">{scene.location_name || 'N/A'}</strong></span>
             <span>Page {scene.page_start || 1}</span>
+            <span title={eighthsEstimated ? 'Estimated — re-upload the script to measure it exactly' : 'Scene length in eighths of a page'}>
+              {formatEighths(eighths)} pgs{eighthsEstimated ? '*' : ''}
+            </span>
             {scene.estimated_duration && (
               <span className="flex items-center gap-1">
                 <Clock className="size-3 text-amber-600 dark:text-amber-500" />
@@ -319,6 +381,50 @@ export function SceneBreakdownCard({ data, projectId, onRefresh }: SceneBreakdow
             <span>Confirm Breakdown</span>
           </Button>
         </div>
+      </div>
+
+      {/* ONE-LINER */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor={`one-liner-${scene.id}`} className="text-xs font-mono font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <FileText className="size-3 text-amber-600 dark:text-amber-500" />
+            One-liner
+            {synopsisSource === 'AI' && (
+              <span className="normal-case font-normal tracking-normal text-[10px] px-1.5 py-0.5 rounded border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                AI draft
+              </span>
+            )}
+            {isSavingSynopsis && <span className="normal-case font-normal text-faint">saving…</span>}
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={draftSynopsis}
+            disabled={isDraftingSynopsis}
+            className="h-7 text-xs font-mono text-violet-700 dark:text-violet-400 hover:bg-violet-500/10 cursor-pointer"
+            title={synopsisSource === 'USER' ? 'Replace your one-liner with an AI draft' : 'Draft this one-liner with AI'}
+          >
+            <Sparkles className={`size-3.5 mr-1 ${isDraftingSynopsis ? 'animate-pulse' : ''}`} />
+            {isDraftingSynopsis ? 'Drafting…' : synopsis.trim() ? 'Redraft with AI' : 'Draft with AI'}
+          </Button>
+        </div>
+        <Input
+          id={`one-liner-${scene.id}`}
+          value={synopsis}
+          onChange={(e) => setSynopsis(e.target.value)}
+          onBlur={saveSynopsis}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') {
+              setSynopsis(scene.synopsis || '')
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          maxLength={200}
+          placeholder="What happens in this scene, in one line — e.g. Sid checks himself out in the bathroom mirror"
+          className="bg-card border-border text-sm font-semibold text-foreground placeholder:font-normal placeholder:text-faint"
+        />
       </div>
 
       {/* SCENE TAGS BAR */}

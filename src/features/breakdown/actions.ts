@@ -22,6 +22,7 @@ import {
   unlinkElement,
 } from './lib/resource-links'
 import { linkCastElement, listCharacters } from '@/features/characters/lib/characters'
+import { ONE_LINER_MIGRATION_HINT } from './lib/one-liners'
 
 
 type ResourceRow = Database['public']['Tables']['resources']['Row']
@@ -224,6 +225,89 @@ export async function getProjectBreakdownStatsAction(
     confirmedElements,
     elementCountsByType: counts,
   }
+}
+
+/**
+ * Save a scene's one-liner as written by a person (AI never overwrites it after this).
+ * An empty one-liner clears it so AI can draft it again.
+ */
+export async function saveSceneOneLinerAction(
+  sceneId: string,
+  synopsis: string
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = createClient()
+  const text = synopsis.replace(/\s+/g, ' ').trim()
+  const { data, error } = await supabase
+    .from('scenes')
+    .update({ synopsis: text || null, synopsis_source: text ? 'USER' : null, updated_at: new Date().toISOString() })
+    .eq('id', sceneId)
+    .select('id')
+  if (error) {
+    return { success: false, error: /synopsis/.test(error.message) ? ONE_LINER_MIGRATION_HINT : error.message }
+  }
+  if (!data?.length) return { success: false, error: 'You do not have edit access to this production.' }
+  return { success: true }
+}
+
+/** One character in the one-liner report's cast legend */
+export interface OneLinerCastEntry {
+  /** cast number as printed ("1"), or the name when the character has no number yet */
+  id: string
+  name: string
+  castNumber: number | null
+}
+
+export interface OneLinerReportData {
+  /** scene id → cast ids in that scene, in cast-number order */
+  castByScene: Record<string, string[]>
+  cast: OneLinerCastEntry[]
+}
+
+/**
+ * Cast for the one-liner report: each scene's characters by cast number (the same numbers as
+ * the call sheet and Day Out of Days), plus the legend of every character in those scenes.
+ */
+export async function getOneLinerReportAction(sceneIds: string[]): Promise<OneLinerReportData> {
+  const supabase = createClient()
+  type CastItem = {
+    scene_id: string
+    name: string
+    characters: { id: string; name: string; cast_number: number | null } | null
+  }
+  const items: CastItem[] = []
+  for (let i = 0; i < sceneIds.length; i += 150) {
+    const { data, error } = await supabase
+      .from('scene_elements')
+      .select('scene_id, name, characters(id, name, cast_number)')
+      .in('scene_id', sceneIds.slice(i, i + 150))
+      .eq('element_type', 'CAST')
+    if (error) throw new Error(`Could not load the cast: ${error.message}`)
+    items.push(...((data || []) as unknown as CastItem[]))
+  }
+
+  // A CAST item not linked to a character yet is listed by its name
+  const entryFor = (item: CastItem): OneLinerCastEntry => {
+    const c = item.characters
+    if (!c) return { id: item.name.toUpperCase(), name: item.name.toUpperCase(), castNumber: null }
+    return { id: c.cast_number != null ? String(c.cast_number) : c.name, name: c.name, castNumber: c.cast_number }
+  }
+  const byOrder = (a: OneLinerCastEntry, b: OneLinerCastEntry) =>
+    (a.castNumber ?? Infinity) - (b.castNumber ?? Infinity) || a.name.localeCompare(b.name)
+
+  const legend = new Map<string, OneLinerCastEntry>()
+  const perScene = new Map<string, Map<string, OneLinerCastEntry>>()
+  for (const item of items) {
+    const entry = entryFor(item)
+    legend.set(entry.id, entry)
+    if (!perScene.has(item.scene_id)) perScene.set(item.scene_id, new Map())
+    perScene.get(item.scene_id)!.set(entry.id, entry)
+  }
+
+  const castByScene: Record<string, string[]> = {}
+  perScene.forEach((entries, sceneId) => {
+    castByScene[sceneId] = Array.from(entries.values()).sort(byOrder).map((e) => e.id)
+  })
+  return { castByScene, cast: Array.from(legend.values()).sort(byOrder) }
 }
 
 /**

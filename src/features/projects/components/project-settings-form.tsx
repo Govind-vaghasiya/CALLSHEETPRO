@@ -54,12 +54,15 @@ interface ProjectSettingsFormProps {
   }
   defaultStartDate?: string
   defaultWrapDate?: string
+  /** The organization's AI key section (rendered by the page, which can read the org settings) */
+  aiSection?: React.ReactNode
 }
 
 export function ProjectSettingsForm({
   project,
   defaultStartDate = '',
   defaultWrapDate = '',
+  aiSection,
 }: ProjectSettingsFormProps) {
   const updateActionWithId = updateProjectSettingsAction.bind(null, project.id)
   const [state, formAction, isPending] = useActionState<ProjectActionState, FormData>(
@@ -360,6 +363,9 @@ export function ProjectSettingsForm({
 
       {/* Production calendar: work week + holidays (drives date pushes and auto-scheduling) */}
       <ProductionCalendarForm projectId={project.id} />
+
+      {/* AI assistant: the organization's API key (same key for every production) */}
+      {aiSection}
 
       {/* Union Rules & Labor Compliance Engine */}
       <UnionRulesForm

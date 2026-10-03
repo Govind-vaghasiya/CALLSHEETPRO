@@ -54,6 +54,10 @@ export interface ScriptSceneItem {
   page_end: number | null
   description: string | null
   estimated_duration: number | null
+  synopsis?: string | null
+  synopsis_source?: 'AI' | 'USER' | null
+  page_eighths?: number | null
+  time_of_day_label?: string | null
   episode_number: string | null
   status: SceneStatus
   ai_confidence: number | null
@@ -868,6 +872,8 @@ export async function updateSceneContentAction(
     .eq('id', sceneId)
 
   if (error) return { error: error.message }
+  // Needs migration 023; until it has been run the label simply isn't kept
+  if (slug) await db.from('scenes').update({ time_of_day_label: slug.timeLabel }).eq('id', sceneId)
 
   // A new location in the slugline re-links the scene's Location in Cast & Crew and the bookings
   if (updatePayload.location_name && before?.location_name !== updatePayload.location_name) {

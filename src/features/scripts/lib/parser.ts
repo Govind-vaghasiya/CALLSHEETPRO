@@ -7,10 +7,14 @@ export interface ParsedScene {
   intExt: IntExt
   locationName: string
   timeOfDay: TimeOfDay
+  /** Time of day as written in the slugline ("EARLY MORNING") */
+  timeLabel: string | null
   pageStart: number
   pageEnd: number
   description: string
   estimatedDuration: number // in seconds (e.g., 60s per page)
+  /** Scene length in 1/8 pages, counted from the lines it fills on each page */
+  pageEighths: number
 }
 
 export interface ParsedPage {
@@ -43,6 +47,39 @@ export function extractScenesFromPages(pages: ParsedPage[]): ParsedScene[] {
 
   interface SceneWithLines extends ParsedScene {
     lines: string[]
+    /** page number → non-blank lines this scene fills on that page */
+    linesByPage: Map<number, number>
+  }
+
+  // A page's length in lines, for measuring eighths. Short pages (end of the script, a page
+  // ending on a scene break) are measured against a typical full page, not their own length.
+  const filledLines = (text: string) => text.split(/\r?\n/).filter((l) => l.trim()).length
+  const pageLineCounts = pages.map((p) => filledLines(p.rawText)).filter((n) => n > 0).sort((a, b) => a - b)
+  const typicalPage = pageLineCounts[Math.floor(pageLineCounts.length * 0.75)] || 50
+  const pageLength = new Map(pages.map((p) => [p.pageNumber, Math.max(filledLines(p.rawText), typicalPage)]))
+  const countEighths = (scene: SceneWithLines) => {
+    let pagesFilled = 0
+    scene.linesByPage.forEach((count, pageNumber) => {
+      pagesFilled += count / (pageLength.get(pageNumber) || typicalPage)
+    })
+    return Math.max(1, Math.round(pagesFilled * 8))
+  }
+  const finish = (scene: SceneWithLines) => {
+    scene.description = scene.lines.join('\n').trim()
+    scene.pageEighths = countEighths(scene)
+    scenes.push({
+      sceneNumber: scene.sceneNumber,
+      heading: scene.heading,
+      intExt: scene.intExt,
+      locationName: scene.locationName,
+      timeOfDay: scene.timeOfDay,
+      timeLabel: scene.timeLabel,
+      pageStart: scene.pageStart,
+      pageEnd: scene.pageEnd,
+      description: scene.description,
+      estimatedDuration: scene.estimatedDuration,
+      pageEighths: scene.pageEighths,
+    })
   }
 
   const scenes: ParsedScene[] = []
@@ -54,10 +91,7 @@ export function extractScenesFromPages(pages: ParsedPage[]): ParsedScene[] {
     const parsed = parseSlugline(trimmed)
 
     if (parsed) {
-      if (currentScene) {
-        currentScene.description = currentScene.lines.join('\n').trim()
-        scenes.push(currentScene)
-      }
+      if (currentScene) finish(currentScene)
 
       const sceneNumber = parsed.explicitNum
         ? parsed.explicitNum.replace(/^#/, '')
@@ -66,26 +100,29 @@ export function extractScenesFromPages(pages: ParsedPage[]): ParsedScene[] {
 
       currentScene = {
         sceneNumber,
-        heading: trimmed,
+        heading: parsed.heading,
         intExt: parsed.intExt,
         locationName: parsed.locationName,
         timeOfDay: parsed.timeOfDay,
+        timeLabel: parsed.timeLabel,
         pageStart: item.pageNumber,
         pageEnd: item.pageNumber,
         description: '',
         estimatedDuration: 60,
+        pageEighths: 1,
         lines: [item.text],
+        linesByPage: new Map([[item.pageNumber, 1]]),
       }
     } else if (currentScene) {
       currentScene.lines.push(item.text)
       currentScene.pageEnd = item.pageNumber
+      if (trimmed) {
+        currentScene.linesByPage.set(item.pageNumber, (currentScene.linesByPage.get(item.pageNumber) || 0) + 1)
+      }
     }
   }
 
-  if (currentScene) {
-    currentScene.description = currentScene.lines.join('\n').trim()
-    scenes.push(currentScene)
-  }
+  if (currentScene) finish(currentScene)
 
   // Calculate estimated duration based on page length (1 page ≈ 60s)
   scenes.forEach((scene) => {

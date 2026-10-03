@@ -12,6 +12,7 @@ import type { ParsedScene } from './parser'
 import { reconcileElementLink, syncProjectLinks } from '@/features/breakdown/lib/resource-links'
 import { extractCharacterCues } from '@/features/characters/lib/character-cues'
 import { forEachLimit } from '@/lib/async'
+import { cleanSceneHeading, hasOneLinerColumns } from '@/features/breakdown/lib/one-liners'
 
 type Client = SupabaseClient<Database>
 
@@ -71,6 +72,7 @@ export async function syncScenesFromDraft(
   const seen = new Set<string>()
   const summary: SceneSyncSummary = { added: 0, changed: 0, omitted: [] }
   const sceneTexts = new Map<string, string>() // scene id → text, for character detection
+  const withOneLinerColumns = await hasOneLinerColumns(sb) // migration 023
 
   // One round trip per scene runs past a serverless time limit on a feature-length script,
   // so new scenes go in as one insert and updates run concurrently.
@@ -95,6 +97,7 @@ export async function syncScenesFromDraft(
       page_end: p.pageEnd,
       description: p.description,
       estimated_duration: p.estimatedDuration,
+      ...(withOneLinerColumns ? { page_eighths: p.pageEighths, time_of_day_label: p.timeLabel } : {}),
       updated_at: new Date().toISOString(),
     }
 
@@ -112,8 +115,10 @@ export async function syncScenesFromDraft(
     }
     sceneTexts.set(prev.id, p.description || '')
 
+    // Headings are compared without margin scene numbers (older drafts were stored with them)
     const changed =
-      norm(prev.heading) !== norm(p.heading) || (prev.description || '').trim() !== (p.description || '').trim()
+      norm(cleanSceneHeading(prev.heading)) !== norm(p.heading) ||
+      (prev.description || '').trim() !== (p.description || '').trim()
     // Breakdown status is kept; a changed scene is flagged for re-review instead of reset
     updates.push({
       id: prev.id,

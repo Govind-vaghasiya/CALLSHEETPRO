@@ -40,6 +40,33 @@ export type RuleCategory = 'WORKING_HOURS' | 'TURNAROUND' | 'CONSECUTIVE_DAYS' |
 export interface Database {
   public: {
     Tables: {
+      organization_ai_settings: {
+        Row: {
+          organization_id: string
+          provider: string
+          vault_secret_id: string
+          key_hint: string
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          organization_id: string
+          provider?: string
+          vault_secret_id: string
+          key_hint: string
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          organization_id?: string
+          provider?: string
+          vault_secret_id?: string
+          key_hint?: string
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       organizations: {
         Row: {
           id: string
@@ -583,6 +610,10 @@ export interface Database {
           page_end: number | null
           description: string | null
           estimated_duration: number | null
+          synopsis: string | null
+          synopsis_source: 'AI' | 'USER' | null
+          page_eighths: number | null
+          time_of_day_label: string | null
           episode_number: string | null
           status: SceneStatus
           ai_confidence: number | null
@@ -610,6 +641,10 @@ export interface Database {
           ai_confidence?: number | null
           revision_color?: RevisionColor | null
           is_changed?: boolean
+          synopsis?: string | null
+          synopsis_source?: 'AI' | 'USER' | null
+          page_eighths?: number | null
+          time_of_day_label?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -632,6 +667,10 @@ export interface Database {
           ai_confidence?: number | null
           revision_color?: RevisionColor | null
           is_changed?: boolean
+          synopsis?: string | null
+          synopsis_source?: 'AI' | 'USER' | null
+          page_eighths?: number | null
+          time_of_day_label?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -1300,6 +1339,18 @@ export interface Database {
       can_modify_project: {
         Args: { proj_id: string }
         Returns: boolean
+      }
+      set_org_ai_key: {
+        Args: { org_id: string; api_key: string }
+        Returns: string
+      }
+      clear_org_ai_key: {
+        Args: { org_id: string }
+        Returns: undefined
+      }
+      get_org_ai_key: {
+        Args: { org_id: string }
+        Returns: string | null
       }
     }
     Enums: {
