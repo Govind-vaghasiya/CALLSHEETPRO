@@ -6,6 +6,7 @@ import type { Database } from '@/types/database'
 import { useModalBehavior } from '@/components/ui/use-modal-behavior'
 import { getStripColorClasses } from '../lib/strip-colors'
 import { searchScenes } from '../lib/scene-search'
+import { formatEighths, sceneEighths, sceneTimeLabel } from '@/features/breakdown/lib/one-liners'
 
 type SceneRow = Database['public']['Tables']['scenes']['Row']
 
@@ -65,7 +66,7 @@ export function AssignScenePicker({ isOpen, onClose, dayLabel, scenes, onPick }:
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && filtered[0]) onPick(filtered[0].id)
               }}
-              placeholder="Search scene #, heading, location, or dialogue"
+              placeholder="Search scene #, location, one-liner, or dialogue"
               className="w-full h-10 pl-9 pr-3 rounded-lg border border-border bg-card text-sm text-foreground placeholder:text-faint outline-none focus:border-amber-500"
             />
           </div>
@@ -91,9 +92,16 @@ export function AssignScenePicker({ isOpen, onClose, dayLabel, scenes, onPick }:
                 >
                   {s.scene_number}
                 </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-mono uppercase text-foreground">{s.heading || 'Untitled scene'}</span>
-                  {s.location_name && <span className="block truncate text-xs text-muted-foreground">{s.location_name}</span>}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2 text-[11px] font-mono uppercase text-muted-foreground">
+                    <span className="truncate">
+                      {(s.int_ext || 'INT').replace('_', '/')} · {sceneTimeLabel(s) || 'Day'} · {s.location_name || 'Untitled scene'}
+                    </span>
+                    <span className="shrink-0">{formatEighths(sceneEighths(s).eighths)} pg</span>
+                  </span>
+                  <span className={`block truncate text-sm ${s.synopsis?.trim() ? 'font-semibold text-foreground' : 'italic text-faint'}`}>
+                    {s.synopsis?.trim() || 'No one-liner yet'}
+                  </span>
                 </span>
               </button>
             </li>

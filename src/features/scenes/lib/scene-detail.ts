@@ -73,14 +73,3 @@ export async function loadSceneDetail(sb: SupabaseClient<Database>, sceneId: str
     notes: (notes || []).map((n) => ({ id: n.id, note: n.note, createdAt: n.created_at })),
   }
 }
-
-/** Page length in the industry's eighths, e.g. 1.375 → "1 3/8". */
-export function formatPageEighths(start: number | null, end: number | null): string {
-  const s = Number(start ?? 0)
-  const e = Number(end ?? s)
-  const eighths = Math.max(1, Math.round((e - s) * 8))
-  const whole = Math.floor(eighths / 8)
-  const rest = eighths % 8
-  if (whole === 0) return `${rest}/8`
-  return rest ? `${whole} ${rest}/8` : `${whole}`
-}

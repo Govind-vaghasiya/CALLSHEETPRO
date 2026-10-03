@@ -418,16 +418,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
                       </div>
                     </div>
 
-                    {/* The one-liner: what happens in the scene (the slugline is on the line below) */}
-                    {s.synopsis?.trim() ? (
-                      <div className="text-[13px] font-semibold leading-snug text-foreground line-clamp-2" title={s.synopsis}>
-                        {s.synopsis}
-                      </div>
-                    ) : (
-                      <div className="text-xs italic text-faint">No one-liner yet</div>
-                    )}
-
-                    <div className="text-[10px] font-mono text-muted-foreground flex items-center justify-between gap-2 pt-1 border-t border-border/50">
+                    <div className="text-[10px] font-mono text-muted-foreground flex items-center justify-between gap-2">
                       <span className="truncate" title={s.location_name || ''}>
                         {s.location_name || 'N/A'}
                         {sceneTimeLabel(s) && <span className="text-faint"> · {sceneTimeLabel(s)}</span>}
@@ -435,6 +426,17 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
                       <span className="shrink-0">
                         {formatEighths(sceneEighths(s).eighths)} pg · p{s.page_start || 1}
                       </span>
+                    </div>
+
+                    {/* The one-liner: what happens in the scene */}
+                    <div className="pt-1.5 border-t border-border/50">
+                      {s.synopsis?.trim() ? (
+                        <div className="text-[13px] font-semibold leading-snug text-foreground line-clamp-2" title={s.synopsis}>
+                          {s.synopsis}
+                        </div>
+                      ) : (
+                        <div className="text-xs italic text-faint">No one-liner yet</div>
+                      )}
                     </div>
                   </div>
                 )

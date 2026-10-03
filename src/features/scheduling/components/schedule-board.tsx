@@ -372,6 +372,16 @@ function UnscheduledPoolSection({
               </div>
             ))
           )}
+          {/* Matches among scheduled scenes are hidden by the Unscheduled filter: say so */}
+          {scope === 'UNSCHEDULED' && poolSearch.trim() && filteredUnscheduledPool.length > 0 && filteredScheduled.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setScope('ALL')}
+              className="w-full py-2 text-xs text-amber-700 dark:text-amber-400 font-medium hover:underline cursor-pointer"
+            >
+              +{filteredScheduled.length} scheduled scene{filteredScheduled.length === 1 ? '' : 's'} also match{filteredScheduled.length === 1 ? 'es' : ''} — show
+            </button>
+          )}
         </div>
       </SortableContext>
     </div>

@@ -3,17 +3,21 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
-import { Calendar, Clock, ExternalLink, FileText, Link2, MapPin, RefreshCw, Tag, Users, X } from 'lucide-react'
+import { Calendar, Clock, ExternalLink, FileText, Link2, RefreshCw, Tag, Users, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useModalBehavior } from '@/components/ui/use-modal-behavior'
 import { getStripColorClasses } from '@/features/scheduling/lib/strip-colors'
 import { formatClockTime } from '@/features/reports/lib/dood-status'
-import { loadSceneDetail, formatPageEighths, type SceneDetail } from '../lib/scene-detail'
+import { loadSceneDetail, type SceneDetail } from '../lib/scene-detail'
+import { cleanSceneHeading, formatEighths, sceneEighths, sceneTimeLabel } from '@/features/breakdown/lib/one-liners'
+import { OneLinerAiButton, useOneLiner } from '@/features/breakdown/components/one-liner-editor'
 import { parseShootAfterTag } from '@/features/scheduling/lib/availability-conflicts'
 
 interface SceneDetailModalProps {
   sceneId: string | null
   onClose: () => void
+  /** The one-liner was edited or drafted here (lets a strip or list update without a reload) */
+  onSynopsisChange?: (sceneId: string, synopsis: string | null, source: 'AI' | 'USER' | null) => void
 }
 
 const GROUPS: Array<{ label: string; types: string[] }> = [
@@ -27,7 +31,7 @@ const GROUPS: Array<{ label: string; types: string[] }> = [
 ]
 
 /** Detail popup for one scene: schedule placement, breakdown, and the scene's script text. */
-export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
+export function SceneDetailModal({ sceneId, onClose, onSynopsisChange }: SceneDetailModalProps) {
   const isOpen = sceneId !== null
   const closeRef = useModalBehavior(isOpen, onClose)
   const [loaded, setLoaded] = useState<{ id: string; detail: SceneDetail | null } | null>(null)
@@ -52,7 +56,7 @@ export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-6 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-150"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -61,52 +65,23 @@ export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="scene-detail-title"
-        className="relative w-full max-w-4xl max-h-[92vh] bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+        className="relative w-full max-w-6xl h-[94vh] bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border bg-card/60">
-          <div className="min-w-0 space-y-1.5">
-            {scene ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`px-2.5 py-0.5 rounded-md border font-mono font-black text-sm ${
-                      getStripColorClasses(scene.int_ext, scene.time_of_day).container
-                    }`}
-                  >
-                    SC {scene.scene_number}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-muted text-xs font-mono text-subtle-foreground">
-                    {(scene.int_ext || 'INT').replace('_', '/')} · {scene.time_of_day || 'DAY'}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-muted text-xs text-subtle-foreground">{scene.status}</span>
-                  {scene.is_changed && (
-                    <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 text-xs">
-                      Changed in latest draft
-                    </span>
-                  )}
-                </div>
-                <h2 id="scene-detail-title" className="text-base sm:text-lg font-bold font-mono uppercase tracking-wide text-foreground">
-                  {scene.heading || 'Untitled scene'}
-                </h2>
-              </>
-            ) : (
-              <h2 id="scene-detail-title" className="text-base font-semibold text-foreground">
-                {isLoading ? 'Loading scene…' : 'Scene not found'}
-              </h2>
-            )}
+        {scene && detail ? (
+          <SceneHeader
+            detail={detail}
+            onClose={onClose}
+            closeRef={closeRef}
+            onSynopsisChange={onSynopsisChange}
+          />
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border bg-card/60">
+            <h2 id="scene-detail-title" className="text-base font-semibold text-foreground">
+              {isLoading ? 'Loading scene…' : 'Scene not found'}
+            </h2>
+            <CloseButton onClose={onClose} closeRef={closeRef} />
           </div>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label="Close scene details (Esc)"
-            title="Close (Esc)"
-            className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-          >
-            <X className="size-5" />
-          </button>
-        </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground">
@@ -115,30 +90,9 @@ export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
         ) : !detail || !scene ? (
           <div className="py-24 text-center text-sm text-muted-foreground">This scene may have been deleted.</div>
         ) : (
-          <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-5 gap-0">
-            {/* Facts & breakdown */}
-            <aside className="lg:col-span-2 p-5 space-y-5 border-b lg:border-b-0 lg:border-r border-border">
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <Fact icon={MapPin} label="Location" value={scene.location_name || '—'} wide />
-                <Fact icon={FileText} label="Length" value={`${formatPageEighths(scene.page_start, scene.page_end)} pg`} />
-                <Fact icon={FileText} label="Pages" value={`${scene.page_start ?? '—'}${scene.page_end && scene.page_end !== scene.page_start ? `–${scene.page_end}` : ''}`} />
-                <Fact icon={Clock} label="Est. shoot time" value={scene.estimated_duration ? `${scene.estimated_duration} min` : '—'} />
-                <Fact
-                  icon={Calendar}
-                  label="Scheduled"
-                  value={
-                    detail.schedule
-                      ? `Day ${detail.schedule.dayNumber ?? '?'} · ${new Date(`${detail.schedule.shootDate}T00:00:00`).toLocaleDateString(undefined, {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                        })}${detail.schedule.callTime ? ` · call ${formatClockTime(detail.schedule.callTime)}` : ''}`
-                      : 'Not scheduled'
-                  }
-                  wide
-                />
-              </dl>
-
+          <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] overflow-y-auto lg:overflow-hidden">
+            {/* Breakdown, continuity, tags, notes (scrolls on its own) */}
+            <aside className="lg:min-h-0 lg:overflow-y-auto p-5 space-y-5 border-b lg:border-b-0 lg:border-r border-border">
               <section className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <Users className="size-3.5" /> Breakdown
@@ -220,28 +174,10 @@ export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
                 </section>
               )}
 
-              {projectId && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Link
-                    href={`/projects/${projectId}/breakdown?scene=${scene.id}`}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-muted"
-                  >
-                    Edit breakdown <ExternalLink className="size-3.5" />
-                  </Link>
-                  {scene.script_document_id && (
-                    <Link
-                      href={`/projects/${projectId}/scripts/${scene.script_document_id}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-muted"
-                    >
-                      Open script <ExternalLink className="size-3.5" />
-                    </Link>
-                  )}
-                </div>
-              )}
             </aside>
 
-            {/* Script text */}
-            <section className="lg:col-span-3 p-4 sm:p-5 bg-muted/40">
+            {/* Script text (scrolls on its own) */}
+            <section className="lg:min-h-0 lg:overflow-y-auto p-4 sm:p-5 bg-muted/40">
               <div className="text-[11px] text-muted-foreground mb-2">{detail.scriptName || 'Script'}</div>
               <div
                 className="screenplay-canvas bg-white text-[#111] rounded-lg shadow-sm px-6 sm:px-10 py-8 text-[13px] leading-relaxed"
@@ -258,23 +194,123 @@ export function SceneDetailModal({ sceneId, onClose }: SceneDetailModalProps) {
   )
 }
 
-function Fact({
-  icon: Icon,
-  label,
-  value,
-  wide,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string
-  wide?: boolean
-}) {
+function CloseButton({ onClose, closeRef }: { onClose: () => void; closeRef: React.Ref<HTMLButtonElement> }) {
   return (
-    <div className={wide ? 'col-span-2' : ''}>
-      <dt className="text-[11px] text-faint flex items-center gap-1">
-        <Icon className="size-3" /> {label}
-      </dt>
-      <dd className="text-foreground font-medium break-words">{value}</dd>
+    <button
+      ref={closeRef}
+      type="button"
+      onClick={onClose}
+      aria-label="Close scene details (Esc)"
+      title="Close (Esc)"
+      className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+    >
+      <X className="size-5" />
+    </button>
+  )
+}
+
+/**
+ * Popup header: badges and actions on one row, the one-liner as the title, then the slugline
+ * with the scene's key facts (length, page, time, where it is scheduled) on one line.
+ */
+function SceneHeader({
+  detail,
+  onClose,
+  closeRef,
+  onSynopsisChange,
+}: {
+  detail: SceneDetail
+  onClose: () => void
+  closeRef: React.Ref<HTMLButtonElement>
+  onSynopsisChange?: SceneDetailModalProps['onSynopsisChange']
+}) {
+  const { scene } = detail
+  const oneLiner = useOneLiner({
+    sceneId: scene.id,
+    projectId: scene.project_id,
+    synopsis: scene.synopsis,
+    source: scene.synopsis_source,
+    onChange: onSynopsisChange,
+  })
+  const { eighths, estimated } = sceneEighths(scene)
+  const pages = `${scene.page_start ?? '—'}${scene.page_end && scene.page_end !== scene.page_start ? `–${scene.page_end}` : ''}`
+  const scheduled = detail.schedule
+    ? `Day ${detail.schedule.dayNumber ?? '?'} · ${new Date(`${detail.schedule.shootDate}T00:00:00`).toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      })}${detail.schedule.callTime ? ` · call ${formatClockTime(detail.schedule.callTime)}` : ''}`
+    : 'Not scheduled'
+  const linkClass =
+    'hidden sm:inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-border text-xs text-foreground hover:bg-muted'
+
+  return (
+    <div className="px-5 pt-3 pb-3 border-b border-border bg-card/60 space-y-1.5">
+      {/* Badges + actions */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+          <span
+            className={`px-2.5 py-0.5 rounded-md border font-mono font-black text-sm ${
+              getStripColorClasses(scene.int_ext, scene.time_of_day).container
+            }`}
+          >
+            SC {scene.scene_number}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-muted text-xs font-mono text-subtle-foreground">
+            {(scene.int_ext || 'INT').replace('_', '/')} · {(sceneTimeLabel(scene) || 'Day').toUpperCase()}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-muted text-xs text-subtle-foreground">{scene.status}</span>
+          {scene.is_changed && (
+            <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 text-xs">
+              Changed in latest draft
+            </span>
+          )}
+        </div>
+        <Link href={`/projects/${scene.project_id}/breakdown?scene=${scene.id}`} className={linkClass}>
+          Edit breakdown <ExternalLink className="size-3" />
+        </Link>
+        {scene.script_document_id && (
+          <Link href={`/projects/${scene.project_id}/scripts/${scene.script_document_id}`} className={linkClass}>
+            Open script <ExternalLink className="size-3" />
+          </Link>
+        )}
+        <OneLinerAiButton oneLiner={oneLiner} />
+        <CloseButton onClose={onClose} closeRef={closeRef} />
+      </div>
+
+      {/* The one-liner is the title: click to edit, Enter saves */}
+      <div className="relative">
+        <label htmlFor={oneLiner.fieldProps.id} className="sr-only">
+          One-liner
+        </label>
+        <input
+          {...oneLiner.fieldProps}
+          type="text"
+          title={oneLiner.source === 'AI' ? 'AI draft — edit it to make it yours' : 'Click to edit the one-liner'}
+          className={`w-full -mx-2 px-2 py-1 rounded-lg border border-transparent bg-transparent text-lg sm:text-xl font-bold text-foreground placeholder:text-base placeholder:font-normal placeholder:text-faint outline-none hover:border-border focus:border-amber-500 focus:bg-background focus:ring-2 focus:ring-amber-500/20 ${
+            oneLiner.isSaving ? 'opacity-60' : ''
+          }`}
+        />
+      </div>
+
+      {/* Slugline + key facts */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <h2 id="scene-detail-title" className="font-mono font-bold uppercase tracking-wide text-subtle-foreground">
+          {cleanSceneHeading(scene.heading) || 'Untitled scene'}
+        </h2>
+        <span className="inline-flex items-center gap-1" title={estimated ? 'Estimated — re-upload the script to measure it' : 'Scene length'}>
+          <FileText className="size-3" /> {formatEighths(eighths)} pg{estimated ? ' (est.)' : ''}
+        </span>
+        <span>Page {pages}</span>
+        {scene.estimated_duration ? (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3" /> {scene.estimated_duration} min
+          </span>
+        ) : null}
+        <span className={`inline-flex items-center gap-1 ${detail.schedule ? 'text-foreground' : ''}`}>
+          <Calendar className="size-3" /> {scheduled}
+        </span>
+      </div>
     </div>
   )
 }
@@ -284,49 +320,66 @@ function Fact({
  * parentheticals and dialogue indented (dialogue in dark blue, per the studio style).
  */
 function ScreenplayText({ text, heading }: { text: string | null; heading: string | null }) {
-  const lines = (text || '').replace(/\r/g, '').split('\n')
   if (!text?.trim()) {
     return <p className="text-zinc-500 italic">No script text stored for this scene.</p>
   }
 
-  const isSlug = (l: string) => /^(INT|EXT|INT\.?\/EXT|I\/E)[\s.]/i.test(l.trim())
-  const isCue = (l: string) => {
-    const t = l.trim()
-    return t.length > 0 && t.length < 40 && t === t.toUpperCase() && /[A-Z]/.test(t) && !isSlug(t) && !/[.!?]$/.test(t.replace(/\(.*\)$/, '').trim())
-  }
+  const isSlug = (l: string) => /^(\d+[A-Z]?\s+)?(INT|EXT|INT\.?\/EXT|I\/E)[\s.]/i.test(l)
+  const isCue = (l: string) =>
+    l.length < 40 && l === l.toUpperCase() && /[A-Z]/.test(l) && !isSlug(l) && !/[.!?]$/.test(l.replace(/\(.*\)$/, '').trim())
 
+  // PDF text keeps the page's line breaks, which wrap mid-sentence in a narrower panel. Rebuild
+  // paragraphs: lines of the same kind join until a blank line, a cue, a slugline or a "- " item.
+  type Block = { kind: 'slug' | 'cue' | 'paren' | 'dialogue' | 'action' | 'gap'; text: string }
+  const blocks: Block[] = []
   let inDialogue = false
-  const out: React.ReactNode[] = []
-  lines.forEach((raw, i) => {
+  for (const raw of text.replace(/\r/g, '').split('\n')) {
     const t = raw.trim()
+    const last = blocks[blocks.length - 1]
     if (!t) {
       inDialogue = false
-      out.push(<div key={i} className="h-3" />)
-      return
+      if (last && last.kind !== 'gap') blocks.push({ kind: 'gap', text: '' })
+      continue
     }
     if (isSlug(t)) {
       inDialogue = false
-      if (heading && t.toUpperCase() === heading.toUpperCase() && i < 3) {
-        out.push(<p key={i} className="font-bold uppercase mb-2">{t}</p>)
-      } else out.push(<p key={i} className="font-bold uppercase mt-2">{t}</p>)
-      return
-    }
-    if (isCue(t)) {
+      blocks.push({ kind: 'slug', text: t })
+    } else if (isCue(t)) {
       inDialogue = true
-      out.push(<p key={i} className="mt-2 text-center uppercase">{t}</p>)
-      return
+      blocks.push({ kind: 'cue', text: t })
+    } else if (inDialogue && /^\(.*\)$/.test(t)) {
+      blocks.push({ kind: 'paren', text: t })
+    } else {
+      const kind = inDialogue ? 'dialogue' : 'action'
+      if (last?.kind === kind && !/^[-•–]\s/.test(t)) last.text += ` ${t}`
+      else blocks.push({ kind, text: t })
     }
-    if (inDialogue && /^\(.*\)$/.test(t)) {
-      out.push(<p key={i} className="mx-auto max-w-[60%] text-center text-zinc-600">{t}</p>)
-      return
-    }
-    if (inDialogue) {
-      out.push(<p key={i} className="mx-auto max-w-[70%] text-blue-800">{t}</p>)
-      return
-    }
-    out.push(<p key={i}>{t}</p>)
-  })
-  return <div>{out}</div>
+  }
+
+  return (
+    <div>
+      {blocks.map((b, i) => {
+        switch (b.kind) {
+          case 'gap':
+            return <div key={i} className="h-3" />
+          case 'slug':
+            return (
+              <p key={i} className={`font-bold uppercase ${i === 0 ? 'mb-2' : 'mt-2'}`}>
+                {i === 0 && heading ? cleanSceneHeading(b.text) : b.text}
+              </p>
+            )
+          case 'cue':
+            return <p key={i} className="mt-2 text-center uppercase">{b.text}</p>
+          case 'paren':
+            return <p key={i} className="mx-auto max-w-[60%] text-center text-zinc-600">{b.text}</p>
+          case 'dialogue':
+            return <p key={i} className="mx-auto max-w-[70%] text-blue-800">{b.text}</p>
+          default:
+            return <p key={i}>{b.text}</p>
+        }
+      })}
+    </div>
+  )
 }
 
 /** "Shoot after scene …" continuity rules, stored as scene tags ("SHOOT AFTER 23"). */

@@ -1,7 +1,7 @@
 /**
  * Forgiving, search-everything scene lookup used wherever scenes are found (stripboard, pickers).
  *
- * Searches: scene number, heading, location, INT/EXT, time of day, the full scene text
+ * Searches: scene number, heading, location, one-liner, INT/EXT, time of day, the full scene text
  * (action + dialogue), breakdown items (cast, props, vehicles…), actor names, tags, notes,
  * and — for scheduled scenes — the shoot day ("day 3", "20/09", "sep").
  *
@@ -17,6 +17,7 @@ export interface SearchableScene {
   int_ext: string | null
   time_of_day: string | null
   description?: string | null
+  synopsis?: string | null
 }
 
 /** Extra per-scene data from the breakdown (see scene-search-index.ts). */
@@ -94,6 +95,7 @@ export function matchScene(
   const number = normalize(scene.scene_number).replace(/\s/g, '')
   const fields = [
     field('Heading', [scene.heading, scene.location_name].filter(Boolean).join(' '), 20),
+    field('One-liner', scene.synopsis, 18),
     field('Setting', [scene.int_ext?.replace('_', ' '), scene.time_of_day].filter(Boolean).join(' '), 12),
     field('Breakdown', extras?.elements.join(' '), 16),
     field('Cast & Crew', extras?.people.join(' '), 16),
@@ -143,7 +145,9 @@ export function matchScene(
       best = { label, points, token }
   }
 
-  const explain = best && best.label !== 'Scene number' && best.label !== 'Heading' ? best : null
+  // The one-liner is shown on the strip itself, so a hit there needs no explanation either
+  const explain =
+    best && best.label !== 'Scene number' && best.label !== 'Heading' && best.label !== 'One-liner' ? best : null
   let snippet: string | null = null
   if (explain?.label === 'Dialogue & action' && scene.description) snippet = makeSnippet(scene.description, explain.token)
   else if (explain?.label === 'Notes' && extras) snippet = makeSnippet(extras.notes.join(' · '), explain.token)

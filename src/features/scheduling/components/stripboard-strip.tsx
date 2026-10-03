@@ -7,11 +7,10 @@ import type { Database } from '@/types/database'
 import type { ScheduleConflict } from '../lib/conflict-detector'
 import { getStripColorClasses } from '../lib/strip-colors'
 import { SceneDetailModal } from '@/features/scenes/components/scene-detail-modal'
+import { cleanSceneHeading, formatEighths, sceneEighths, sceneTimeLabel } from '@/features/breakdown/lib/one-liners'
 import {
   GripVertical,
   Clock,
-  FileText,
-  MapPin,
   X,
   ChevronUp,
   ChevronDown,
@@ -55,6 +54,8 @@ interface StripboardStripProps {
 
 export { getStripColorClasses } from '../lib/strip-colors'
 
+const INT_EXT_SHORT: Record<string, string> = { INT: 'INT', EXT: 'EXT', INT_EXT: 'I/E' }
+
 export function StripboardStrip({
   scene,
   estimatedMinutes = 30,
@@ -81,6 +82,16 @@ export function StripboardStrip({
   const [isEditingMinutes, setIsEditingMinutes] = useState(false)
   const [isPinning, setIsPinning] = useState(false)
   const hasCritical = sceneConflicts.some((c) => c.severity === 'CRITICAL')
+  const timeLabel = sceneTimeLabel(scene).toUpperCase()
+  const slugline =
+    cleanSceneHeading(scene.heading) ||
+    [`${INT_EXT_SHORT[scene.int_ext || 'INT'] || 'INT'}.`, scene.location_name, timeLabel && `- ${timeLabel}`]
+      .filter(Boolean)
+      .join(' ')
+  // A one-liner edited in the scene popup shows at once (until the board reloads this scene)
+  const [editedSynopsis, setEditedSynopsis] = useState<{ base: string | null; value: string | null } | null>(null)
+  const synopsis = editedSynopsis && editedSynopsis.base === (scene.synopsis ?? null) ? editedSynopsis.value : scene.synopsis
+  const { eighths, estimated: eighthsEstimated } = sceneEighths(scene)
 
   // Double-click (or Enter when focused) opens the scene details; clicks on the strip's own buttons don't
   const openDetail = (e: React.SyntheticEvent) => {
@@ -122,43 +133,36 @@ export function StripboardStrip({
       }}
       tabIndex={isOverlay ? undefined : 0}
       title={isOverlay ? undefined : 'Double-click for scene details'}
-      className={`p-2.5 rounded-xl border transition-all select-none shadow-sm flex items-center justify-between gap-2 ${colors.container} ${
+      className={`px-2 py-1.5 rounded-lg border transition-all select-none shadow-sm flex items-start gap-1.5 ${colors.container} ${
         hasCritical ? 'ring-2 ring-red-600 ring-offset-1 ring-offset-background' : ''
       } ${
         isOverlay ? 'shadow-2xl scale-[1.02] border-amber-400 ring-2 ring-amber-500/50 cursor-grabbing' : ''
       }`}
     >
-      {/* Left: Drag / Order Controls + Scene Number */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span
-          {...(sourceDayId && !isOverlay ? { ...attributes, ...listeners } : {})}
-          className="opacity-70 hover:opacity-100 cursor-grab active:cursor-grabbing p-0.5"
-          title="Drag scene to reschedule"
-        >
-          <GripVertical className="size-3.5" />
-        </span>
+      {/* Drag handle */}
+      <span
+        {...(sourceDayId && !isOverlay ? { ...attributes, ...listeners } : {})}
+        className="opacity-70 hover:opacity-100 cursor-grab active:cursor-grabbing p-0.5 mt-0.5 shrink-0"
+        title="Drag scene to reschedule"
+      >
+        <GripVertical className="size-3.5" />
+      </span>
 
-        {/* Scene # Pill */}
-        <span className="font-mono text-xs font-black px-2 py-0.5 rounded bg-black/20 border border-black/10 shrink-0">
-          #{scene.scene_number}
-        </span>
-
-        {/* Heading & Details */}
-        <div className="min-w-0 flex-1">
-          <div className="font-mono text-xs font-bold uppercase tracking-wide truncate">
-            {scene.heading || 'UNTITLED SCENE'}
-          </div>
-          <div className="flex items-center gap-3 text-[10px] font-mono opacity-80 truncate">
-            {scene.location_name && (
-              <span className="flex items-center gap-0.5 truncate">
-                <MapPin className="size-3" />
-                {scene.location_name}
-              </span>
-            )}
-            <span className="flex items-center gap-0.5">
-              <FileText className="size-3" />
-              Pg {scene.page_start || 1}
-            </span>
+      {/* Strip body: one line of scene facts, then the one-liner (Movie Magic style) */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 min-w-0 font-mono text-[10px]">
+          <span className="text-xs font-black px-1.5 rounded bg-black/20 border border-black/10 shrink-0">
+            {scene.scene_number}
+          </span>
+          {/* The slugline as written: INT. LOCATION - TIME (strip colour shows INT/EXT and day/night) */}
+          <span className="font-bold uppercase truncate min-w-0 flex-1" title={slugline}>
+            {slugline}
+          </span>
+          <span
+            className="shrink-0 flex items-center gap-1.5 opacity-90"
+            title={`${formatEighths(eighths)} pages${eighthsEstimated ? ' (estimated)' : ''} · script page ${scene.page_start || 1}`}
+          >
+            <span>{formatEighths(eighths)}{eighthsEstimated ? '*' : ''}</span>
             {isEditingMinutes && onChangeMinutes ? (
               <input
                 type="number"
@@ -194,82 +198,86 @@ export function StripboardStrip({
                 {estimatedMinutes}m
               </span>
             )}
-          </div>
-          {slotLabel && (
-            <div className="flex items-center gap-1 text-[10px] font-mono font-bold opacity-90">
-              <span title="Planned time from the day's running order">{slotLabel}</span>
-              {isPinning && onSetFixedStart ? (
-                <input
-                  type="time"
-                  autoFocus
-                  defaultValue={fixedStartTime?.slice(0, 5) || ''}
-                  aria-label={`Fixed start time for scene ${scene.scene_number}`}
-                  onBlur={(e) => {
-                    setIsPinning(false)
-                    const v = e.target.value
-                    if (v !== (fixedStartTime?.slice(0, 5) || '')) onSetFixedStart(v || null)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    if (e.key === 'Escape') setIsPinning(false)
-                  }}
-                  className="h-5 px-1 rounded bg-black/20 border border-black/20 text-inherit text-[10px] outline-none"
-                />
-              ) : onSetFixedStart ? (
-                <button
-                  type="button"
-                  onClick={() => setIsPinning(true)}
-                  className={`inline-flex items-center gap-0.5 rounded px-1 cursor-pointer ${
-                    fixedStartTime ? 'bg-black/25' : 'opacity-60 hover:opacity-100 hover:bg-black/15'
-                  }`}
-                  title={fixedStartTime ? 'Fixed start — click to change or clear' : 'Fix this scene to an exact start time'}
-                >
-                  <Pin className="size-3" />
-                  {fixedStartTime ? `fixed ${fixedStartTime.slice(0, 5)}` : null}
-                </button>
-              ) : null}
-              {fixedStartTime && onSetFixedStart && !isPinning && (
-                <button
-                  type="button"
-                  onClick={() => onSetFixedStart(null)}
-                  className="opacity-60 hover:opacity-100 cursor-pointer"
-                  aria-label="Clear fixed start time"
-                  title="Clear fixed start time"
-                >
-                  <X className="size-3" />
-                </button>
-              )}
-            </div>
-          )}
-          {sceneConflicts.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onFindFixes?.(sceneConflicts.find((c) => c.severity === 'CRITICAL') || sceneConflicts[0])}
-              disabled={!onFindFixes}
-              className={`mt-0.5 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold normal-case text-left ${
-                hasCritical ? 'bg-red-700 text-white' : 'bg-black/25'
-              } ${onFindFixes ? 'cursor-pointer hover:brightness-110' : ''}`}
-              title={`${sceneConflicts.map((c) => `${c.title}\n${c.description}`).join('\n\n')}${onFindFixes ? '\n\nClick to see fixes' : ''}`}
-            >
-              <AlertTriangle className="size-3 shrink-0" />
-              <span className="truncate">
-                {sceneConflicts[0].title}
-                {sceneConflicts.length > 1 ? ` +${sceneConflicts.length - 1}` : ''}
-              </span>
-              {onFindFixes && <span className="shrink-0 underline underline-offset-2">Fix</span>}
-            </button>
-          )}
-          {note && <div className="text-[10px] font-sans normal-case opacity-90 truncate mt-0.5">{note}</div>}
+          </span>
         </div>
+
+        <div
+          className={`mt-0.5 text-[11px] leading-snug font-sans normal-case line-clamp-2 ${
+            synopsis?.trim() ? 'font-semibold' : 'italic opacity-60'
+          }`}
+          title={synopsis || undefined}
+        >
+          {synopsis?.trim() || 'No one-liner yet'}
+        </div>
+        {slotLabel && (
+          <div className="flex items-center gap-1 text-[10px] font-mono font-bold opacity-90">
+            <span title="Planned time from the day's running order">{slotLabel}</span>
+            {isPinning && onSetFixedStart ? (
+              <input
+                type="time"
+                autoFocus
+                defaultValue={fixedStartTime?.slice(0, 5) || ''}
+                aria-label={`Fixed start time for scene ${scene.scene_number}`}
+                onBlur={(e) => {
+                  setIsPinning(false)
+                  const v = e.target.value
+                  if (v !== (fixedStartTime?.slice(0, 5) || '')) onSetFixedStart(v || null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'Escape') setIsPinning(false)
+                }}
+                className="h-5 px-1 rounded bg-black/20 border border-black/20 text-inherit text-[10px] outline-none"
+              />
+            ) : onSetFixedStart ? (
+              <button
+                type="button"
+                onClick={() => setIsPinning(true)}
+                className={`inline-flex items-center gap-0.5 rounded px-1 cursor-pointer ${
+                  fixedStartTime ? 'bg-black/25' : 'opacity-60 hover:opacity-100 hover:bg-black/15'
+                }`}
+                title={fixedStartTime ? 'Fixed start — click to change or clear' : 'Fix this scene to an exact start time'}
+              >
+                <Pin className="size-3" />
+                {fixedStartTime ? `fixed ${fixedStartTime.slice(0, 5)}` : null}
+              </button>
+            ) : null}
+            {fixedStartTime && onSetFixedStart && !isPinning && (
+              <button
+                type="button"
+                onClick={() => onSetFixedStart(null)}
+                className="opacity-60 hover:opacity-100 cursor-pointer"
+                aria-label="Clear fixed start time"
+                title="Clear fixed start time"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        )}
+        {sceneConflicts.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onFindFixes?.(sceneConflicts.find((c) => c.severity === 'CRITICAL') || sceneConflicts[0])}
+            disabled={!onFindFixes}
+            className={`mt-0.5 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold normal-case text-left ${
+              hasCritical ? 'bg-red-700 text-white' : 'bg-black/25'
+            } ${onFindFixes ? 'cursor-pointer hover:brightness-110' : ''}`}
+            title={`${sceneConflicts.map((c) => `${c.title}\n${c.description}`).join('\n\n')}${onFindFixes ? '\n\nClick to see fixes' : ''}`}
+          >
+            <AlertTriangle className="size-3 shrink-0" />
+            <span className="truncate">
+              {sceneConflicts[0].title}
+              {sceneConflicts.length > 1 ? ` +${sceneConflicts.length - 1}` : ''}
+            </span>
+            {onFindFixes && <span className="shrink-0 underline underline-offset-2">Fix</span>}
+          </button>
+        )}
+        {note && <div className="text-[10px] font-sans normal-case opacity-90 truncate mt-0.5">{note}</div>}
       </div>
 
       {/* Right Controls */}
       <div className="flex items-center gap-1 shrink-0">
-        {/* Int/Ext + Time Pill */}
-        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${colors.badge}`}>
-          {(scene.int_ext || 'INT').replace('_', '/')} · {scene.time_of_day || 'DAY'}
-        </span>
-
         {isUnscheduledPool ? (
           onAssign &&
           assignOptions &&
@@ -282,7 +290,7 @@ export function StripboardStrip({
                 onChange={(e) => {
                   if (e.target.value) onAssign(e.target.value)
                 }}
-                className="appearance-none h-6 pl-5 pr-5 rounded text-[10px] font-mono font-bold bg-black/15 hover:bg-black/25 border border-black/15 text-inherit cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-black/40"
+                className="appearance-none w-[76px] truncate h-6 pl-5 pr-4 rounded text-[10px] font-mono font-bold bg-black/15 hover:bg-black/25 border border-black/15 text-inherit cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-black/40"
               >
                 <option value="" className="bg-background text-foreground">
                   {assignLabel}
@@ -333,7 +341,11 @@ export function StripboardStrip({
       </div>
     </div>
     {!isOverlay && (
-      <SceneDetailModal sceneId={isDetailOpen ? scene.id : null} onClose={() => setIsDetailOpen(false)} />
+      <SceneDetailModal
+        sceneId={isDetailOpen ? scene.id : null}
+        onClose={() => setIsDetailOpen(false)}
+        onSynopsisChange={(_id, value) => setEditedSynopsis({ base: scene.synopsis ?? null, value })}
+      />
     )}
     </>
   )
