@@ -101,8 +101,11 @@ export function CallSheetPaper({ data }: { data: CallSheetFullData }) {
                           {item.scene.int_ext || 'INT'} · {item.scene.time_of_day || 'DAY'}
                         </span>
                       </td>
-                      <td className="py-2 px-3 border-r border-zinc-200 font-bold uppercase text-zinc-900">
-                        {item.scene.heading || 'UNTITLED SCENE'}
+                      <td className="py-2 px-3 border-r border-zinc-200 text-zinc-900">
+                        <div className="font-bold uppercase">{item.scene.heading || 'UNTITLED SCENE'}</div>
+                        {item.scene.synopsis?.trim() && (
+                          <div className="mt-0.5 font-sans text-[11px] text-zinc-600">{item.scene.synopsis}</div>
+                        )}
                       </td>
                       <td className="py-2 px-3 border-r border-zinc-200 text-zinc-700 truncate">
                         {item.scene.location_name || '—'}

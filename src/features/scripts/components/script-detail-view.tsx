@@ -7,9 +7,6 @@ import type {
   ScriptSceneItem,
   ScriptPageItem,
 } from '@/features/scripts/actions'
-import {
-  getRevisionColorMeta,
-} from '@/features/scripts/lib/revision-colors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +17,7 @@ import {
   Search,
   Layers,
   BookOpen,
+  GitCompare,
   Sun,
   Moon,
   Sunset,
@@ -33,12 +31,22 @@ import {
 } from 'lucide-react'
 import { ScreenplayReader } from './screenplay-reader'
 import { AddSceneModal } from './add-scene-modal'
+import { DraftCompareView } from './draft-compare-view'
+import { sceneMatchScore } from '@/features/scheduling/lib/scene-search'
+import { useProjectTitleSuffix } from '@/features/projects/components/project-title'
 
 interface ScriptDetailViewProps {
   projectId: string
   script: ScriptDocumentWithStats
   scenes: ScriptSceneItem[]
   pages: ScriptPageItem[]
+  /** All drafts of the project, for comparing */
+  drafts: ScriptDocumentWithStats[]
+  initialTab?: 'SCENES' | 'READER' | 'COMPARE'
+  /** Draft to compare against (?base=…) */
+  compareBaseId?: string
+  /** Not the current draft: scenes are read from the file and cannot be edited */
+  readOnly?: boolean
 }
 
 export function ScriptDetailView({
@@ -46,8 +54,12 @@ export function ScriptDetailView({
   script,
   scenes,
   pages,
+  drafts,
+  initialTab = 'SCENES',
+  compareBaseId,
+  readOnly = false,
 }: ScriptDetailViewProps) {
-  const [activeTab, setActiveTab] = useState<'SCENES' | 'READER'>('SCENES')
+  const [activeTab, setActiveTab] = useState<'SCENES' | 'READER' | 'COMPARE'>(initialTab)
   const [searchQuery, setSearchQuery] = useState('')
   const [intExtFilter, setIntExtFilter] = useState<'ALL' | 'INT' | 'EXT' | 'INT_EXT'>('ALL')
   const [activePageNum, setActivePageNum] = useState<number>(1)
@@ -58,7 +70,17 @@ export function ScriptDetailView({
     setScenesList(scenes)
   }, [scenes])
 
-  const colorMeta = getRevisionColorMeta(script.revision_color)
+  useProjectTitleSuffix(script.file_name)
+  const currentDraft = drafts.find((d) => d.is_current && d.id !== script.id)
+  const isNewerThanCurrent =
+    !!currentDraft &&
+    (script.version > currentDraft.version || (script.version === currentDraft.version && script.created_at > currentDraft.created_at))
+  const draftVersions = React.useMemo(() => Object.fromEntries(drafts.map((d) => [d.id, d.version])), [drafts])
+  /** "v3" when a scene still has an older draft's text (its changes not applied yet) */
+  const olderDraftOf = (scene: ScriptSceneItem) =>
+    scene.script_document_id && scene.script_document_id !== script.id && draftVersions[scene.script_document_id]
+      ? `v${draftVersions[scene.script_document_id]}`
+      : null
 
   // Next suggested scene number
   const nextSuggestedNumber = React.useMemo(() => {
@@ -74,21 +96,8 @@ export function ScriptDetailView({
     if (intExtFilter !== 'ALL' && scene.int_ext !== intExtFilter) {
       return false
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      const headingMatch = scene.heading?.toLowerCase().includes(q)
-      const locMatch = scene.location_name?.toLowerCase().includes(q)
-      const numMatch = scene.scene_number.toLowerCase().includes(q)
-      const descMatch = scene.description?.toLowerCase().includes(q)
-      if (!headingMatch && !locMatch && !numMatch && !descMatch) {
-        return false
-      }
-    }
-    return true
+    return sceneMatchScore(scene, searchQuery) > 0
   })
-
-  // Group scenes by location count
-  const uniqueLocations = new Set(scenesList.map((s) => s.location_name).filter(Boolean))
 
   const [selectedSceneNumber, setSelectedSceneNumber] = useState<string | undefined>(
     scenesList[0]?.scene_number
@@ -105,44 +114,35 @@ export function ScriptDetailView({
   }
 
   return (
-    <div className="space-y-8 w-full">
-      {/* Header */}
-      <div>
+    <div className="space-y-4 w-full">
+      {/* Header: the file name sits next to the project name in the project header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <Link
           href={`/projects/${projectId}/scripts`}
-          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 mb-3 transition-colors"
+          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition-colors"
         >
           <ArrowLeft className="size-3.5" /> Back to Screenplay Hub
         </Link>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span
-                className={`px-2.5 py-0.5 rounded-md border text-xs font-semibold inline-flex items-center gap-1.5 ${colorMeta.pillBg} ${colorMeta.pillBorder} ${colorMeta.pillText}`}
+        {readOnly && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-900 dark:text-amber-200 sm:order-none">
+            <span>
+              {isNewerThanCurrent
+                ? `v${script.version} is not applied yet — the app still follows ${currentDraft ? `v${currentDraft.version}` : 'another draft'}.`
+                : `A past draft${currentDraft ? ` (the app follows v${currentDraft.version})` : ''}.`}{' '}
+              Read only.
+            </span>
+            {activeTab !== 'COMPARE' && currentDraft && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('COMPARE')}
+                className="font-semibold underline underline-offset-2 hover:no-underline cursor-pointer"
               >
-                <span className={`size-2 rounded-full ${colorMeta.dotBg}`} />
-                v{script.version} · {colorMeta.label}
-              </span>
-              {script.is_current && (
-                <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px]">
-                  Active Shooting Script
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-[10px] font-mono border-border-strong">
-                {script.file_type}
-              </Badge>
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-              {script.file_name}
-            </h1>
-
-            <p className="text-xs text-muted-foreground">
-              {scenes.length} detected scenes across {pages.length} pages · {uniqueLocations.size} distinct film sets/locations
-              {script.revision_notes && ` · "${script.revision_notes}"`}
-            </p>
+                {isNewerThanCurrent ? 'Review changes & apply' : `Compare with v${currentDraft.version}`}
+              </button>
+            )}
           </div>
+        )}
 
           {/* Tab Selector */}
           <div className="flex items-center gap-1 bg-card border border-border p-1 rounded-lg">
@@ -171,8 +171,20 @@ export function ScriptDetailView({
               <BookOpen className="size-3.5" />
               <span>Script Reader ({pages.length}p)</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('COMPARE')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'COMPARE'
+                  ? 'bg-amber-500 text-zinc-950 shadow-sm font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <GitCompare className="size-3.5" />
+              <span>Compare Drafts</span>
+            </button>
           </div>
-        </div>
       </div>
 
       {/* VIEW 1: EXTRACTED SCENES BREAKDOWN */}
@@ -209,14 +221,16 @@ export function ScriptDetailView({
                 ))}
               </div>
 
-              <Button
-                type="button"
-                onClick={() => setIsAddSceneOpen(true)}
-                className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs h-8 px-3 flex items-center gap-1.5 cursor-pointer shadow-md"
-              >
-                <Plus className="size-3.5" />
-                <span>Add Scene</span>
-              </Button>
+              {!readOnly && (
+                <Button
+                  type="button"
+                  onClick={() => setIsAddSceneOpen(true)}
+                  className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs h-8 px-3 flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Add Scene</span>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -243,6 +257,14 @@ export function ScriptDetailView({
                         {/* Scene Number */}
                         <span className="px-2 py-0.5 rounded bg-muted border border-border-strong text-amber-700 dark:text-amber-400 font-mono font-bold text-xs">
                           SCENE {scene.scene_number}
+                          {olderDraftOf(scene) && (
+                            <span
+                              className="ml-1.5 font-normal text-[10px] text-amber-800 dark:text-amber-300"
+                              title="This scene still has an older draft's text — apply its changes in Compare Drafts"
+                            >
+                              · {olderDraftOf(scene)} text
+                            </span>
+                          )}
                         </span>
 
                         <div className="flex items-center gap-1.5">
@@ -288,10 +310,16 @@ export function ScriptDetailView({
                     </CardHeader>
 
                     <CardContent className="p-4 pt-2 space-y-3">
-                      {/* Description Preview */}
-                      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                        {scene.description || 'No action summary available.'}
-                      </p>
+                      {/* One-liner, falling back to the opening of the scene text */}
+                      {scene.synopsis?.trim() ? (
+                        <p className="text-xs text-foreground line-clamp-2 leading-relaxed" title={scene.synopsis}>
+                          {scene.synopsis}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                          {scene.description || 'No action summary available.'}
+                        </p>
+                      )}
 
                       {/* Footer Info */}
                       <div className="pt-2 border-t border-border/60 flex items-center justify-between text-[11px] text-faint font-mono">
@@ -332,6 +360,18 @@ export function ScriptDetailView({
           scenes={scenesList}
           pages={pages}
           initialSceneNumber={selectedSceneNumber}
+          draftVersions={draftVersions}
+          readOnly={readOnly}
+        />
+      )}
+
+      {/* VIEW 3: TWO DRAFTS SIDE BY SIDE */}
+      {activeTab === 'COMPARE' && (
+        <DraftCompareView
+          projectId={projectId}
+          drafts={drafts}
+          scriptId={script.id}
+          initialBaseId={compareBaseId ?? (readOnly ? currentDraft?.id : undefined)}
         />
       )}
 

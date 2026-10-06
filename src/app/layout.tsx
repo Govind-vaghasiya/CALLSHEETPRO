@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { themeInitScript } from "@/components/theme/theme";
 import { AuthHashHandler } from "@/components/auth/auth-hash-handler";
@@ -33,7 +34,8 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {/* Sets the light/dark class before first paint (next/script, so React never renders a raw <script>) */}
+        <Script id="theme-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col font-sans bg-background text-foreground">
         <AuthHashHandler />

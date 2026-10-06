@@ -8,6 +8,7 @@ import { ProjectTabs } from '@/components/layout/project-tabs'
 import { CollaborationHeaderBar } from '@/features/collaboration/components/collaboration-header-bar'
 import { getActiveOrganization } from '@/features/organizations/active-org'
 import { SyncActiveOrganization } from '@/features/organizations/components/sync-active-organization'
+import { ProjectTitle, ProjectTitleProvider } from '@/features/projects/components/project-title'
 
 export default async function ProjectLayout({
   children,
@@ -26,6 +27,7 @@ export default async function ProjectLayout({
   const otherOrg = active?.organization.id !== project.organization_id
 
   return (
+    <ProjectTitleProvider>
     <div className="flex-1 flex flex-col w-full">
       {otherOrg && <SyncActiveOrganization organizationId={project.organization_id} />}
       {/* Project Sub-Header */}
@@ -55,9 +57,7 @@ export default async function ProjectLayout({
                 {project.status.replace('_', ' ')}
               </Badge>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              {project.name}
-            </h1>
+            <ProjectTitle name={project.name} />
             {project.description && (
               <p className="text-sm text-muted-foreground max-w-2xl truncate">
                 {project.description}
@@ -95,5 +95,6 @@ export default async function ProjectLayout({
       {/* Main Tab Content */}
       <div className="flex-1 w-full p-3 sm:p-5 max-w-full">{children}</div>
     </div>
+    </ProjectTitleProvider>
   )
 }

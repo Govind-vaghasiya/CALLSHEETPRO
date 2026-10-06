@@ -36,7 +36,10 @@ export interface LinkedCharacter {
 }
 
 /** The Cast & Crew entry an element is linked to. */
-export type LinkedResource = Pick<ResourceRow, 'id' | 'name' | 'display_name' | 'resource_type'>
+export type LinkedResource = Pick<ResourceRow, 'id' | 'name' | 'display_name' | 'resource_type'> & {
+  /** How many scenes in the project need this entry */
+  sceneCount?: number
+}
 
 export interface SceneBreakdownData {
   scene: Database['public']['Tables']['scenes']['Row']
@@ -106,7 +109,27 @@ export async function getSceneBreakdownAction(sceneId: string): Promise<SceneBre
   const links: Record<string, LinkedResource> = {}
   for (const r of requirements || []) {
     const res = r.resources as unknown as LinkedResource | null
-    if (r.element_id && res) links[r.element_id] = res
+    if (r.element_id && res) links[r.element_id] = { ...res }
+  }
+
+  const resourceIds = Array.from(new Set(Object.values(links).map((l) => l.id)))
+  if (resourceIds.length) {
+    const { data: usage, error: usageErr } = await supabase
+      .from('scene_requirements')
+      .select('resource_id, scene_id')
+      .in('resource_id', resourceIds)
+    if (usageErr) console.error('Failed to count scene usage for breakdown links:', usageErr)
+    const scenesByResource = new Map<string, Set<string>>()
+    for (const u of usage || []) {
+      if (!u.resource_id || !u.scene_id) continue
+      const set = scenesByResource.get(u.resource_id) ?? new Set<string>()
+      set.add(u.scene_id)
+      scenesByResource.set(u.resource_id, set)
+    }
+    for (const l of Object.values(links)) {
+      const count = scenesByResource.get(l.id)?.size
+      if (count) l.sceneCount = count
+    }
   }
 
   // 6. Characters for CAST items

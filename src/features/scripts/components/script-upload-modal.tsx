@@ -56,7 +56,12 @@ interface ScriptUploadModalProps {
   onClose: () => void
   suggestedVersion?: number
   suggestedColor?: RevisionColor
+  /** A current draft exists, so the new one can be compared with it before applying */
+  hasCurrentDraft?: boolean
 }
+
+/** What happens to the project's scenes when a new draft arrives */
+type ApplyMode = 'review' | 'now' | 'store'
 
 export function ScriptUploadModal({
   projectId,
@@ -64,6 +69,7 @@ export function ScriptUploadModal({
   onClose,
   suggestedVersion = 1,
   suggestedColor = 'WHITE',
+  hasCurrentDraft = false,
 }: ScriptUploadModalProps) {
   const router = useRouter()
   const { notify } = useFeedback()
@@ -72,6 +78,7 @@ export function ScriptUploadModal({
   const [version, setVersion] = useState<number>(suggestedVersion)
   const [selectedColor, setSelectedColor] = useState<RevisionColor>(suggestedColor)
   const [isCurrent, setIsCurrent] = useState(true)
+  const [applyMode, setApplyMode] = useState<ApplyMode>('review')
 
   // The upload runs as short server steps (each well inside the host's time limit);
   // progress is shown between them and a failed step can be retried without re-uploading.
@@ -82,7 +89,12 @@ export function ScriptUploadModal({
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const formDataRef = useRef<FormData | null>(null)
-  const uploadRef = useRef<{ documentId: string; becomesCurrent: boolean; scenes: ParsedScene[] } | null>(null)
+  const uploadRef = useRef<{
+    documentId: string
+    becomesCurrent: boolean
+    previousCurrentId: string | null
+    scenes: ParsedScene[]
+  } | null>(null)
 
   const started = startedAt !== null
   const handleClose = () => {
@@ -107,6 +119,8 @@ export function ScriptUploadModal({
   const setStep = (id: StepId, status: StepStatus, detail?: string) =>
     setSteps((prev) => ({ ...prev, [id]: { status, detail } }))
 
+  const reviewing = hasCurrentDraft && applyMode === 'review'
+
   const runFrom = async (first: StepId) => {
     setRunning(true)
     setError(null)
@@ -129,7 +143,11 @@ export function ScriptUploadModal({
           uploadRef.current = res
           setStep('upload', 'done', `${res.totalPages} page${res.totalPages === 1 ? '' : 's'} · ${res.scenes.length} scene${res.scenes.length === 1 ? '' : 's'} found`)
           if (!res.becomesCurrent) {
-            setStep('scenes', 'skipped', 'Not the current draft, so project scenes are unchanged')
+            setStep(
+              'scenes',
+              'skipped',
+              reviewing ? 'You will review the changes next — nothing in the app changes until you apply them' : 'Not the current draft, so project scenes are unchanged'
+            )
             setStep('links', 'skipped')
           }
         }
@@ -172,6 +190,13 @@ export function ScriptUploadModal({
       setRunning(false)
     }
 
+    const upload = uploadRef.current
+    if (reviewing && upload && !upload.becomesCurrent && upload.previousCurrentId) {
+      notify('Draft uploaded — review what changed, then apply', 'success')
+      handleCloseAfterSuccess()
+      router.push(`/projects/${projectId}/scripts/${upload.documentId}?tab=compare&base=${upload.previousCurrentId}`)
+      return
+    }
     notify('Script uploaded and processed', 'success')
     router.refresh()
     handleCloseAfterSuccess()
@@ -191,6 +216,8 @@ export function ScriptUploadModal({
     if (!selectedFile || running) return
     const fd = new FormData(e.currentTarget)
     fd.set('file', selectedFile) // dropped files never reach the hidden input
+    // Reviewing first: the new draft only becomes current when its changes are applied
+    if (hasCurrentDraft) fd.set('isCurrent', applyMode === 'now' ? 'true' : 'false')
     formDataRef.current = fd
     setSteps(initialSteps())
     setLinkProgress(null)
@@ -504,7 +531,39 @@ export function ScriptUploadModal({
             />
           </div>
 
-          {/* Set as Active Draft Switch */}
+          {/* What happens to the app's scenes */}
+          {hasCurrentDraft ? (
+            <fieldset className="space-y-1.5">
+              <legend className="text-xs font-medium text-foreground mb-1.5">When this draft has changes</legend>
+              {(
+                [
+                  ['review', 'Review the changes first (recommended)', 'Opens this draft next to the current one, word by word. Nothing in the app changes until you apply — all at once or scene by scene.'],
+                  ['now', 'Apply all changes now', 'Scenes, breakdown and schedule follow this draft straight away. You can still compare the drafts afterwards.'],
+                  ['store', 'Just store it', 'Keep it as a reference draft. The app keeps following the current draft.'],
+                ] as const
+              ).map(([mode, title, hint]) => (
+                <label
+                  key={mode}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${
+                    applyMode === mode ? 'border-amber-500/60 bg-amber-500/5' : 'border-border bg-card/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="applyMode"
+                    value={mode}
+                    checked={applyMode === mode}
+                    onChange={() => setApplyMode(mode)}
+                    className="mt-0.5 accent-amber-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-subtle-foreground">
+                    <strong className="text-foreground block font-medium">{title}</strong>
+                    {hint}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          ) : (
           <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card/40">
             <input
               id="isCurrent"
@@ -520,6 +579,7 @@ export function ScriptUploadModal({
               Syncs newly detected scenes and page lengths across schedules and call sheets.
             </Label>
           </div>
+          )}
 
           {/* Modal Footer */}
           <div className="border-t border-border/80 pt-4 flex items-center justify-between">

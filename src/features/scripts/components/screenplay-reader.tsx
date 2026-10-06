@@ -30,6 +30,8 @@ import { ScriptMetadataModal } from './script-metadata-modal'
 import { exportToFountain, exportToFDX } from '../lib/screenplay-export-utils'
 import { printFullScript, printScenes } from '../lib/screenplay-print'
 import { useDismiss } from '@/components/ui/use-dismiss'
+import { useFeedback } from '@/components/ui/feedback-provider'
+import { sceneMatchScore } from '@/features/scheduling/lib/scene-search'
 import type { RevisionColor } from '@/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -70,6 +72,10 @@ interface ScreenplayReaderProps {
   pages: ScriptPageItem[]
   initialSceneNumber?: string
   initialPageNumber?: number
+  /** Draft id → version, to tag scenes still on an older draft's text */
+  draftVersions?: Record<string, number>
+  /** A past or not-yet-applied draft: scenes are read from its file and cannot be edited */
+  readOnly?: boolean
 }
 
 export function ScreenplayReader({
@@ -78,6 +84,8 @@ export function ScreenplayReader({
   pages,
   initialSceneNumber,
   initialPageNumber = 1,
+  draftVersions = {},
+  readOnly = false,
 }: ScreenplayReaderProps) {
   // Local scenes state for immediate optimistic updates
   const [scenes, setScenes] = useState<ScriptSceneItem[]>(initialScenes)
@@ -104,8 +112,11 @@ export function ScreenplayReader({
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base')
 
   // Inline editing state for scene number
+  const { notify } = useFeedback()
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [movingSceneId, setMovingSceneId] = useState<string | null>(null)
+  const [moveValue, setMoveValue] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
 
   // Drag and drop state & auto-scroll container ref
@@ -204,14 +215,7 @@ export function ScreenplayReader({
   // Filtered Scenes for left panel
   const filteredScenes = useMemo(() => {
     if (!searchQuery.trim()) return scenes
-    const q = searchQuery.toLowerCase()
-    return scenes.filter((s) => {
-      const numMatch = s.scene_number.toLowerCase().includes(q)
-      const locMatch = s.location_name?.toLowerCase().includes(q)
-      const headingMatch = s.heading?.toLowerCase().includes(q)
-      const descMatch = s.description?.toLowerCase().includes(q)
-      return numMatch || locMatch || headingMatch || descMatch
-    })
+    return scenes.filter((s) => sceneMatchScore(s, searchQuery) > 0)
   }, [scenes, searchQuery])
 
   // ---- PDF / print: a clean screenplay document, never the screen
@@ -399,11 +403,12 @@ export function ScreenplayReader({
     setScenes(reordered)
     setActiveSceneId(movedItem.id)
 
-    await updateScenesOrderBatchAction(
+    const result = await updateScenesOrderBatchAction(
       reordered.map((s) => s.id),
       script.id,
       script.project_id
     )
+    if (result.error) notify(result.error, 'error')
     setIsProcessing(false)
   }
 
@@ -463,11 +468,12 @@ export function ScreenplayReader({
     setActiveSceneId(movedItem.id)
 
     // Save batch order in database
-    await updateScenesOrderBatchAction(
+    const result = await updateScenesOrderBatchAction(
       reordered.map((s) => s.id),
       script.id,
       script.project_id
     )
+    if (result.error) notify(result.error, 'error')
   }
 
   const handleDragEnd = () => {
@@ -604,20 +610,30 @@ export function ScreenplayReader({
           <div className="h-4 w-px bg-muted mx-1 hidden sm:block" />
 
           {/* Active Scene Indicator */}
-          <div className="flex items-center gap-1.5 font-mono text-xs text-foreground">
-            <span className="px-2 py-0.5 rounded bg-amber-500 text-zinc-950 font-bold">
+          <div className="flex items-center gap-1.5 font-mono text-xs text-foreground min-w-0">
+            <span className="px-2 py-0.5 rounded bg-amber-500 text-zinc-950 font-bold shrink-0">
               SCENE {activeSceneObj?.scene_number}
             </span>
-            <span className="font-semibold text-subtle-foreground truncate max-w-[180px] sm:max-w-[280px]">
-              {activeSceneObj?.heading || activeSceneObj?.location_name}
-            </span>
+            <div className="min-w-0">
+              <div className="font-semibold text-subtle-foreground truncate max-w-[180px] sm:max-w-[280px]">
+                {activeSceneObj?.heading || activeSceneObj?.location_name}
+              </div>
+              {activeSceneObj?.synopsis?.trim() && (
+                <div
+                  className="font-sans text-[11px] text-muted-foreground truncate max-w-[180px] sm:max-w-[360px]"
+                  title={activeSceneObj.synopsis}
+                >
+                  {activeSceneObj.synopsis}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right: Controls & Multi-Format Exports */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Edit Scene Text Toggle */}
-          {viewMode === 'SINGLE_SCENE' && (
+          {viewMode === 'SINGLE_SCENE' && !readOnly && (
             <button
               type="button"
               onClick={() => setIsEditingContent(!isEditingContent)}
@@ -795,7 +811,7 @@ export function ScreenplayReader({
             <div className="text-xs font-mono font-bold uppercase tracking-wider text-subtle-foreground">
               SCENES ({scenes.length})
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className={`flex items-center gap-1.5 ${readOnly ? 'hidden' : ''}`}>
               <button
                 type="button"
                 onClick={() => setIsAddSceneOpen(true)}
@@ -840,7 +856,9 @@ export function ScreenplayReader({
                 No scenes matching &quot;{searchQuery}&quot;
               </div>
             ) : (
-              filteredScenes.map((s, idx) => {
+              filteredScenes.map((s) => {
+                // Position in the full script, so moves and drags stay correct while searching
+                const idx = scenes.indexOf(s)
                 const isSelected = activeSceneObj?.id === s.id
                 const isEditing = editingSceneId === s.id
                 const isDragging = draggedIdx === idx
@@ -849,7 +867,7 @@ export function ScreenplayReader({
                 return (
                   <div
                     key={s.id}
-                    draggable={!isEditing}
+                    draggable={!isEditing && !readOnly}
                     onDragStart={(e) => handleDragStart(e, idx)}
                     onDragOver={(e) => handleDragOver(e, idx)}
                     onDragLeave={handleDragLeave}
@@ -875,7 +893,7 @@ export function ScreenplayReader({
                       {/* Left: Drag Handle & Scene Number */}
                       <div className="flex items-center gap-1.5">
                         <span
-                          className="text-faint hover:text-subtle-foreground cursor-grab active:cursor-grabbing p-0.5"
+                          className={`text-faint hover:text-subtle-foreground cursor-grab active:cursor-grabbing p-0.5 ${readOnly ? 'hidden' : ''}`}
                           title="Drag up or down (list auto-scrolls)"
                         >
                           <GripVertical className="size-3.5" />
@@ -917,6 +935,7 @@ export function ScreenplayReader({
                             className="flex items-center gap-1 group/edit"
                             onDoubleClick={(e) => {
                               e.stopPropagation()
+                              if (readOnly) return
                               setEditingSceneId(s.id)
                               setEditValue(s.scene_number)
                             }}
@@ -928,6 +947,14 @@ export function ScreenplayReader({
                             >
                               SCENE {s.scene_number}
                             </span>
+                            {s.script_document_id && s.script_document_id !== script.id && draftVersions[s.script_document_id] && (
+                              <span
+                                className="rounded border border-amber-500/40 px-1 text-[9px] font-mono text-amber-800 dark:text-amber-300"
+                                title="This scene still has an older draft's text — apply its changes in Compare Drafts"
+                              >
+                                v{draftVersions[s.script_document_id]} text
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
@@ -935,7 +962,7 @@ export function ScreenplayReader({
                                 setEditingSceneId(s.id)
                                 setEditValue(s.scene_number)
                               }}
-                              className="opacity-0 group-hover/edit:opacity-100 text-muted-foreground hover:text-foreground transition-opacity p-0.5 cursor-pointer"
+                              className={`opacity-0 group-hover/edit:opacity-100 text-muted-foreground hover:text-foreground transition-opacity p-0.5 cursor-pointer ${readOnly ? 'hidden' : ''}`}
                               title="Rename Scene (e.g. 4A, 10B)"
                             >
                               <Edit2 className="size-3" />
@@ -945,7 +972,7 @@ export function ScreenplayReader({
                       </div>
 
                       {/* Right Controls: Move Up, Move Down, Jump to #, + Sub */}
-                      <div className="flex items-center gap-1">
+                      <div className={`flex items-center gap-1 ${readOnly ? 'hidden' : ''}`}>
                         <button
                           type="button"
                           onClick={(e) => handleReorder(s, 'UP', e)}
@@ -965,23 +992,45 @@ export function ScreenplayReader({
                           <ChevronDown className="size-3.5" />
                         </button>
                         {/* Quick Jump / Move to Position # */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const target = prompt(
-                              `Move Scene ${s.scene_number} directly to position (1-${scenes.length}):`,
-                              String(idx + 1)
-                            )
-                            if (target && !isNaN(Number(target))) {
-                              handleMoveSceneToPosition(idx, parseInt(target, 10))
-                            }
-                          }}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-amber-700 dark:hover:text-amber-400 hover:bg-muted transition-colors cursor-pointer border border-border/80"
-                          title={`Move Scene ${s.scene_number} to position #`}
-                        >
-                          #{idx + 1}
-                        </button>
+                        {movingSceneId === s.id ? (
+                          <input
+                            type="number"
+                            min={1}
+                            max={scenes.length}
+                            autoFocus
+                            value={moveValue}
+                            onChange={(e) => setMoveValue(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onFocus={(e) => e.target.select()}
+                            onKeyDown={(e) => {
+                              e.stopPropagation()
+                              if (e.key === 'Enter') {
+                                const target = parseInt(moveValue, 10)
+                                setMovingSceneId(null)
+                                if (target >= 1 && target <= scenes.length) handleMoveSceneToPosition(idx, target)
+                                else notify(`Enter a position from 1 to ${scenes.length}.`, 'error')
+                              } else if (e.key === 'Escape') {
+                                setMovingSceneId(null)
+                              }
+                            }}
+                            onBlur={() => setMovingSceneId(null)}
+                            className="w-12 px-1 py-0.5 rounded text-[10px] font-mono bg-background text-foreground border border-amber-500 outline-none"
+                            title={`Move Scene ${s.scene_number} to position 1-${scenes.length}, then press Enter`}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setMoveValue(String(idx + 1))
+                              setMovingSceneId(s.id)
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-amber-700 dark:hover:text-amber-400 hover:bg-muted transition-colors cursor-pointer border border-border/80"
+                            title={`Move Scene ${s.scene_number} to position #`}
+                          >
+                            #{idx + 1}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => handleAddSubScene(s, e)}
@@ -994,14 +1043,22 @@ export function ScreenplayReader({
                       </div>
                     </div>
 
-                    {/* Slugline Heading */}
-                    <div
-                      className={`font-mono text-xs font-bold uppercase tracking-wide truncate ${
-                        isSelected ? 'text-foreground' : 'text-subtle-foreground'
-                      }`}
-                    >
+                    {/* Slugline Heading (small and light), then the one-liner as the main line */}
+                    <div className="font-mono text-[10px] uppercase tracking-wide truncate text-muted-foreground">
                       {s.heading || s.location_name}
                     </div>
+                    {s.synopsis?.trim() ? (
+                      <div
+                        className={`mt-1 text-[13px] font-semibold leading-snug line-clamp-2 ${
+                          isSelected ? 'text-foreground' : 'text-subtle-foreground'
+                        }`}
+                        title={s.synopsis}
+                      >
+                        {s.synopsis}
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[11px] italic text-faint">No one-liner yet</div>
+                    )}
                   </div>
                 )
               })

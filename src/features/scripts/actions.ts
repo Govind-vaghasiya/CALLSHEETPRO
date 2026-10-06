@@ -204,6 +204,8 @@ export type ScriptUploadStart =
   | {
       documentId: string
       becomesCurrent: boolean
+      /** The draft that was current before this upload, for comparing */
+      previousCurrentId: string | null
       totalPages: number
       scenes: ParsedScene[]
     }
@@ -330,6 +332,7 @@ export async function startScriptUploadAction(projectId: string, formData: FormD
     return {
       documentId,
       becomesCurrent,
+      previousCurrentId: currentDocs?.[0]?.id ?? null,
       totalPages: parseResult.totalPages,
       scenes: becomesCurrent ? parseResult.scenes : [],
     }
@@ -826,8 +829,9 @@ export async function updateScenesOrderBatchAction(
     db.from('scenes').update({ scene_order: index + 1 }).eq('id', id)
   )
 
-  await Promise.all(updates)
+  const failed = (await Promise.all(updates)).find((r) => r.error)
   revalidatePath(`/projects/${projectId}/scripts/${scriptId}`)
+  if (failed?.error) return { error: `Could not save the new scene order: ${failed.error.message}` }
   return { success: true }
 }
 

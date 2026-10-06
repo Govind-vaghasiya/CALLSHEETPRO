@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useFeedback } from '@/components/ui/feedback-provider'
 import type {
   SceneBreakdownData,
+  LinkedResource,
 } from '../actions'
 import {
   addSceneElementAction,
@@ -464,7 +465,7 @@ export function SceneBreakdownCard({ data, projectId, onRefresh, onSynopsisChang
                 </div>
 
                 {/* Elements List */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                   {catElements.map((item) => {
                     const isConfirmed = item.confirm_status === 'CONFIRMED' || item.confirm_status === 'EDITED'
                     const isEditingThis = editingElementId === item.id
@@ -602,14 +603,14 @@ export function SceneBreakdownCard({ data, projectId, onRefresh, onSynopsisChang
                               <Link
                                 href={`/projects/${projectId}/resources/${links[item.id].id}`}
                                 className="text-[11px] text-muted-foreground hover:text-amber-700 dark:hover:text-amber-400 flex items-center gap-1 truncate"
-                                title="Open in Cast & Crew"
+                                title={`Open ${links[item.id].name} in Cast & Crew`}
                               >
                                 <Link2 className="size-3 shrink-0" />
                                 {links[item.id].resource_type === 'PERSON'
                                   ? links[item.id].name === UNCAST_ACTOR_NAME
                                     ? 'Cast & Crew · actor not cast yet'
                                     : `Cast & Crew · ${links[item.id].name}`
-                                  : 'In Cast & Crew'}
+                                  : linkedResourceSummary(links[item.id])}
                               </Link>
                             ) : (
                               isLinkableElementType(item.element_type) &&
@@ -658,4 +659,20 @@ export function SceneBreakdownCard({ data, projectId, onRefresh, onSynopsisChang
       </div>
     </div>
   )
+}
+
+const RESOURCE_KIND: Record<string, string> = {
+  LOCATION: 'Location',
+  PROP: 'Prop',
+  VEHICLE: 'Vehicle',
+  ANIMAL: 'Animal',
+  EQUIPMENT: 'Equipment',
+  OTHER: 'Item',
+}
+
+/** "Prop · in 4 scenes" / "Location · only this scene" */
+function linkedResourceSummary(link: LinkedResource) {
+  const kind = RESOURCE_KIND[link.resource_type] ?? 'Item'
+  if (!link.sceneCount) return kind
+  return `${kind} · ${link.sceneCount === 1 ? 'only this scene' : `in ${link.sceneCount} scenes`}`
 }

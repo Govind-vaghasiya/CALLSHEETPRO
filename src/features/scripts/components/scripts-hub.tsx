@@ -71,6 +71,10 @@ export function ScriptsHub({
 
   // Suggested next version and revision color
   const maxVersion = scripts.reduce((max, s) => Math.max(max, s.version), 0)
+  // The newest draft, when it is newer than the one the app follows (uploaded to review first)
+  const newerDraft = currentScript?.is_current
+    ? scripts.find((s) => !s.is_current && (s.version > currentScript.version || (s.version === currentScript.version && s.created_at > currentScript.created_at)))
+    : undefined
   const suggestedVersion = maxVersion + 1
 
   const handleMakeCurrent = (scriptId: string) => {
@@ -239,9 +243,19 @@ export function ScriptsHub({
               {currentScript.file_name}
             </h3>
 
+            {newerDraft && (
+              <Link
+                href={`/projects/${projectId}/scripts/${newerDraft.id}?tab=compare&base=${currentScript.id}`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+              >
+                v{newerDraft.version} ({newerDraft.file_name}) is uploaded but not applied yet — review the changes
+                <ArrowRight className="size-3" />
+              </Link>
+            )}
+
             <p className="text-xs text-muted-foreground">
               {currentScript.total_scenes} scenes detected across {currentScript.total_pages} pages
-              {currentScript.revision_date && ` · Issued ${new Date(currentScript.revision_date).toLocaleDateString()}`}
+              {currentScript.revision_date && ` · Issued ${formatIssueDate(currentScript.revision_date)}`}
               {currentScript.revision_notes && ` · "${currentScript.revision_notes}"`}
             </p>
           </div>
@@ -380,7 +394,7 @@ export function ScriptsHub({
                           )}
                           {script.revision_date && (
                             <div className="text-[10px] text-faint font-mono">
-                              Issued: {new Date(script.revision_date).toLocaleDateString()}
+                              Issued: {formatIssueDate(script.revision_date)}
                             </div>
                           )}
                         </td>
@@ -398,11 +412,25 @@ export function ScriptsHub({
                               </Button>
                             </Link>
 
+                            {!script.is_current && currentScript?.is_current && (
+                              <Link href={`/projects/${projectId}/scripts/${script.id}?tab=compare&base=${currentScript.id}`}>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 text-xs border-border-strong text-subtle-foreground hover:text-foreground"
+                                  title={`Compare with the current draft (v${currentScript.version}) and apply changes scene by scene`}
+                                >
+                                  Compare
+                                </Button>
+                              </Link>
+                            )}
+
                             {!script.is_current && (
                               <Button
                                 variant="outline"
                                 size="sm"
                                 disabled={isPending}
+                                title="Apply all of this draft's changes now, without reviewing them"
                                 onClick={() => handleMakeCurrent(script.id)}
                                 className="h-8 text-xs border-border text-amber-700 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
                               >
@@ -438,6 +466,7 @@ export function ScriptsHub({
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
         suggestedVersion={suggestedVersion}
+        hasCurrentDraft={scripts.some((s) => s.is_current)}
       />
 
       {/* Accidental Deletion Modal */}
@@ -477,4 +506,14 @@ export function ScriptsHub({
       )}
     </div>
   )
+}
+
+/** "1 Oct 2026" — fixed locale and time zone so the server and the browser render the same text */
+function formatIssueDate(date: string) {
+  return new Date(`${date.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
 }
