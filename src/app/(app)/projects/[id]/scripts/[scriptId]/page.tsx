@@ -4,6 +4,9 @@ import { getScriptById, getScriptPages, getProjectScenes, getProjectScripts } fr
 import { draftScenesFromPages } from '@/features/scripts/lib/draft-scenes'
 import { ScriptDetailView } from '@/features/scripts/components/script-detail-view'
 
+// Merging a draft and uploading run as server actions on this page; give them time on hosting
+export const maxDuration = 60
+
 export default async function ScriptDetailPage({
   params,
   searchParams,

@@ -49,6 +49,33 @@ export function normalizeCharacterName(raw: string): string {
     .toUpperCase()
 }
 
+/**
+ * A character name typed in mixed case ("Govind", "Mrs Rao (V.O.)"): a short name line that starts
+ * a block and is followed by dialogue-width lines. Dialogue sits in a narrow column, so the next
+ * line is short; an action line that happens to be one or two words is followed by a wide one.
+ */
+export function isMixedCaseCue(lines: string[], i: number): boolean {
+  const line = (lines[i] || '').trim()
+  if (!line || isAllCaps(line) || isSlug(line.toUpperCase())) return false
+  const name = line.replace(EXTENSION, ' ').trim()
+  if (!name || name.length > 30 || /[.,!?:;]$/.test(name)) return false
+  const words = name.split(/\s+/)
+  if (words.length > 3 || !words.every((w) => /^[A-Z][A-Za-z.'’-]*$/.test(w))) return false
+  if (NOT_CHARACTERS.has(name.toUpperCase())) return false
+
+  let p = i - 1
+  while (p >= 0 && !(lines[p] || '').trim()) p--
+  const prev = p >= 0 ? lines[p].trim() : ''
+  const startsBlock = p < i - 1 || !prev || /[.!?:"”)]$/.test(prev) || isSlug(prev.toUpperCase())
+  if (!startsBlock) return false
+
+  let n = i + 1
+  while (n < lines.length && !(lines[n] || '').trim()) n++
+  if (n - i > 2 || n >= lines.length) return false
+  const next = lines[n].trim()
+  return /^\(.*\)$/.test(next) || (next.length <= 40 && !isSlug(next.toUpperCase()) && !isAllCaps(next))
+}
+
 export function extractCharacterCues(text: string | null | undefined): string[] {
   const lines = (text || '').replace(/\r/g, '').split('\n').map((l) => l.trim())
   const found: string[] = []
@@ -56,6 +83,14 @@ export function extractCharacterCues(text: string | null | undefined): string[] 
 
   for (let i = 0; i < lines.length - 1; i++) {
     const line = lines[i]
+    if (line && isMixedCaseCue(lines, i)) {
+      const name = normalizeCharacterName(line)
+      if (name.length >= 2 && !seen.has(name)) {
+        seen.add(name)
+        found.push(name)
+      }
+      continue
+    }
     if (!line || line.length > 40 || !isAllCaps(line) || isSlug(line) || isTransition(line)) continue
     if (/[.!?]$/.test(line.replace(EXTENSION, '').trim())) continue // an all-caps sentence, not a name
 

@@ -10,6 +10,7 @@ import {
   linkUploadedScriptAction,
   finishScriptUploadAction,
 } from '@/features/scripts/actions'
+import { mergeDraftIntoMasterAction } from '@/features/scripts/compare-actions'
 import type { ParsedScene } from '@/features/scripts/lib/parser'
 import {
   REVISION_COLORS,
@@ -61,7 +62,7 @@ interface ScriptUploadModalProps {
 }
 
 /** What happens to the project's scenes when a new draft arrives */
-type ApplyMode = 'review' | 'now' | 'store'
+type ApplyMode = 'merge' | 'review' | 'store'
 
 export function ScriptUploadModal({
   projectId,
@@ -78,7 +79,7 @@ export function ScriptUploadModal({
   const [version, setVersion] = useState<number>(suggestedVersion)
   const [selectedColor, setSelectedColor] = useState<RevisionColor>(suggestedColor)
   const [isCurrent, setIsCurrent] = useState(true)
-  const [applyMode, setApplyMode] = useState<ApplyMode>('review')
+  const [applyMode, setApplyMode] = useState<ApplyMode>('merge')
 
   // The upload runs as short server steps (each well inside the host's time limit);
   // progress is shown between them and a failed step can be retried without re-uploading.
@@ -120,6 +121,8 @@ export function ScriptUploadModal({
     setSteps((prev) => ({ ...prev, [id]: { status, detail } }))
 
   const reviewing = hasCurrentDraft && applyMode === 'review'
+  // Merging: the draft's changes go into the master script, highlighted until accepted
+  const merging = hasCurrentDraft && applyMode === 'merge'
 
   const runFrom = async (first: StepId) => {
     setRunning(true)
@@ -133,7 +136,7 @@ export function ScriptUploadModal({
     try {
       for (const id of order.slice(order.indexOf(first))) {
         // A draft that isn't made current leaves the project's scenes alone
-        if ((id === 'scenes' || id === 'links') && uploadRef.current && !uploadRef.current.becomesCurrent) continue
+        if ((id === 'scenes' || id === 'links') && uploadRef.current && !uploadRef.current.becomesCurrent && !merging) continue
         current = id
         setStep(id, 'active')
 
@@ -142,7 +145,7 @@ export function ScriptUploadModal({
           if ('error' in res) return fail(res.error)
           uploadRef.current = res
           setStep('upload', 'done', `${res.totalPages} page${res.totalPages === 1 ? '' : 's'} · ${res.scenes.length} scene${res.scenes.length === 1 ? '' : 's'} found`)
-          if (!res.becomesCurrent) {
+          if (!res.becomesCurrent && !merging) {
             setStep(
               'scenes',
               'skipped',
@@ -154,7 +157,14 @@ export function ScriptUploadModal({
 
         const upload = uploadRef.current!
 
-        if (id === 'scenes') {
+        if (id === 'scenes' && merging && !upload.becomesCurrent) {
+          const res = await mergeDraftIntoMasterAction(projectId, upload.documentId)
+          if ('error' in res) return fail(res.error)
+          const parts = [res.updated && `${res.updated} changed`, res.added && `${res.added} new`].filter(Boolean)
+          setStep('scenes', 'done', parts.length ? `${parts.join(' · ')} — highlighted for review` : 'No changes from the master script')
+          for (const s of res.skipped) notify(`Not merged — ${s.reason}`, 'error')
+          if (res.parked.length) notify(`Not in the new draft, kept as: ${res.parked.join(', ')} — delete them in Compare Drafts if they are cut`, 'info')
+        } else if (id === 'scenes') {
           const res = await syncUploadedScenesAction(projectId, upload.documentId, upload.scenes)
           if ('error' in res) return fail(res.error)
           const omitted = res.omitted.length ? ` · ${res.omitted.length} not in this draft` : ''
@@ -197,6 +207,12 @@ export function ScriptUploadModal({
       router.push(`/projects/${projectId}/scripts/${upload.documentId}?tab=compare&base=${upload.previousCurrentId}`)
       return
     }
+    if (merging && upload && !upload.becomesCurrent) {
+      notify('Draft merged — new text is highlighted in yellow until you accept it', 'success')
+      handleCloseAfterSuccess()
+      router.push(`/projects/${projectId}/scripts/${upload.documentId}?tab=reader`)
+      return
+    }
     notify('Script uploaded and processed', 'success')
     router.refresh()
     handleCloseAfterSuccess()
@@ -217,7 +233,8 @@ export function ScriptUploadModal({
     const fd = new FormData(e.currentTarget)
     fd.set('file', selectedFile) // dropped files never reach the hidden input
     // Reviewing first: the new draft only becomes current when its changes are applied
-    if (hasCurrentDraft) fd.set('isCurrent', applyMode === 'now' ? 'true' : 'false')
+    // The merge makes the draft current itself, after its changes are in the master
+    if (hasCurrentDraft) fd.set('isCurrent', 'false')
     formDataRef.current = fd
     setSteps(initialSteps())
     setLinkProgress(null)
@@ -445,8 +462,9 @@ export function ScriptUploadModal({
                 id="version"
                 name="version"
                 type="number"
-                min={1}
-                max={99}
+                min={0.01}
+                max={999}
+                step="any"
                 value={version}
                 onChange={(e) => setVersion(Number(e.target.value) || 1)}
                 required
@@ -537,9 +555,9 @@ export function ScriptUploadModal({
               <legend className="text-xs font-medium text-foreground mb-1.5">When this draft has changes</legend>
               {(
                 [
-                  ['review', 'Review the changes first (recommended)', 'Opens this draft next to the current one, word by word. Nothing in the app changes until you apply — all at once or scene by scene.'],
-                  ['now', 'Apply all changes now', 'Scenes, breakdown and schedule follow this draft straight away. You can still compare the drafts afterwards.'],
-                  ['store', 'Just store it', 'Keep it as a reference draft. The app keeps following the current draft.'],
+                  ['merge', 'Merge into the master script (recommended)', 'New and changed text goes into the master script highlighted in yellow. Accept or reject it scene by scene, or all at once. Breakdown and schedule stay with each scene.'],
+                  ['review', 'Compare side by side first', 'Opens this draft next to the master’s draft, word by word, and lets you pick which scenes to merge. Nothing changes until you do.'],
+                  ['store', 'Just store it', 'Keep it as a reference draft. The master script does not change.'],
                 ] as const
               ).map(([mode, title, hint]) => (
                 <label

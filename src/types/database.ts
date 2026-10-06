@@ -614,6 +614,9 @@ export interface Database {
           synopsis_source: 'AI' | 'USER' | null
           page_eighths: number | null
           time_of_day_label: string | null
+          accepted_heading: string | null
+          accepted_description: string | null
+          changes_from_document_id: string | null
           episode_number: string | null
           status: SceneStatus
           ai_confidence: number | null
@@ -645,6 +648,9 @@ export interface Database {
           synopsis_source?: 'AI' | 'USER' | null
           page_eighths?: number | null
           time_of_day_label?: string | null
+          accepted_heading?: string | null
+          accepted_description?: string | null
+          changes_from_document_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -671,6 +677,9 @@ export interface Database {
           synopsis_source?: 'AI' | 'USER' | null
           page_eighths?: number | null
           time_of_day_label?: string | null
+          accepted_heading?: string | null
+          accepted_description?: string | null
+          changes_from_document_id?: string | null
           created_at?: string
           updated_at?: string
         }

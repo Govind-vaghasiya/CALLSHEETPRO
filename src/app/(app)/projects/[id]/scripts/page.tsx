@@ -4,6 +4,9 @@ import { getProjectById } from '@/features/projects/actions'
 import { getProjectScripts } from '@/features/scripts/actions'
 import { ScriptsHub } from '@/features/scripts/components/scripts-hub'
 
+// Merging a draft and uploading run as server actions on this page; give them time on hosting
+export const maxDuration = 60
+
 export default async function ProjectScriptsPage({
   params,
 }: {

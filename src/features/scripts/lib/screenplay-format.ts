@@ -1,4 +1,5 @@
 import { parseSlugline } from './slugline'
+import { isMixedCaseCue } from '@/features/characters/lib/character-cues'
 
 export type ScreenplayLineType =
   | 'SLUGLINE'
@@ -106,8 +107,9 @@ export function classifyScreenplayLines(
       !trimmed.endsWith(',') &&
       trimmed.length <= 36
 
-    if (isUpper && prevType !== 'CHARACTER') {
-      formatted.push({ text: trimmed, type: 'CHARACTER' })
+    // A name typed in mixed case ("Govind") is shown as the cue it is
+    if ((isUpper && prevType !== 'CHARACTER') || (prevType !== 'CHARACTER' && isMixedCaseCue(lines, i))) {
+      formatted.push({ text: isUpper ? trimmed : trimmed.toUpperCase(), type: 'CHARACTER' })
       prevType = 'CHARACTER'
       continue
     }

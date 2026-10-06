@@ -41,7 +41,7 @@ export async function applyDraftChangesAction(
   oldDocumentId: string,
   newDocumentId: string,
   overrides: PairOverrides,
-  decisions: RowDecision[]
+  decisions: RowDecision[] | 'ALL'
 ): Promise<{ error: string } | ApplyDraftResult> {
   try {
     const sb = await createClient()
@@ -69,4 +69,26 @@ export async function applyDraftChangesAction(
     console.error('Apply draft changes error:', err)
     return { error: err instanceof Error ? err.message : 'Could not apply the changes.' }
   }
+}
+
+/**
+ * Merge a whole draft into the master script (the project's scenes): every change with the default
+ * choices, highlighted for review. The base is the draft the master currently follows.
+ */
+export async function mergeDraftIntoMasterAction(
+  projectId: string,
+  documentId: string
+): Promise<{ error: string } | (ApplyDraftResult & { baseId: string | null })> {
+  const sb = await createClient()
+  const { data: current } = await sb
+    .from('script_documents')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('is_current', true)
+    .neq('id', documentId)
+    .limit(1)
+  const baseId = current?.[0]?.id ?? null
+  if (!baseId) return { error: 'There is no master script to merge into yet — make this draft current instead.' }
+  const res = await applyDraftChangesAction(projectId, baseId, documentId, { unpair: [], pair: [] }, 'ALL')
+  return 'error' in res ? res : { ...res, baseId }
 }

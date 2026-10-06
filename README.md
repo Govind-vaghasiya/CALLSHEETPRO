@@ -37,6 +37,32 @@ and Supabase.
 
 ### 6 October 2026
 
+**Master script with highlighted changes** (needs migration `025`)
+- The project's working script is now the **Master Script**. Uploading a new draft offers
+  **Merge into the master script** (default), **Compare side by side first**, or **Just store it**.
+- Merged text is highlighted in **yellow** in the Script Reader, like tracked changes in Word.
+  Each changed scene has **Accept** (the text becomes final) and **Reject** (back to the text
+  before the merge; a scene the draft added is removed). **Accept all** handles every scene at
+  once, "Show deletions" shows removed words struck through, and saving your own edit in the
+  editor also makes a scene final.
+- Scenes with changes to review are marked "changed"/"new" in the reader's scene list and
+  "to review" on the scene cards, with a count and **Accept all** at the top.
+- "Set as Active" is replaced by **Merge into Master** on each draft. Merging runs in short steps
+  with clear errors (it used to time out silently on hosting).
+- When merging everything, a scene the new draft dropped keeps its breakdown and schedule and is
+  renamed (e.g. "5 OMITTED") if the new draft reuses its number; delete it in Compare Drafts.
+- Compare Drafts is drawn like a screenplay page (centred character names, indented dialogue)
+  with new words in yellow and removed words in red.
+- Scene text is stored and shown without page headers, page numbers or (MORE)/(CONT'D) breaks.
+- Character names typed in mixed case ("Govind") are recognised as speaking characters.
+- Draft versions can have decimals (1.1, 5.6).
+- Scripts page: the Master Script is now a wider fifth card next to the four summary cards, with
+  **Open Master Script** on its right; the Version & Revision column uses plain black text with
+  the revision colour as a dot.
+
+> **After pulling:** run `supabase/migrations/025_script_versions_and_tracked_changes.sql` once in
+> the Supabase SQL Editor — highlighted changes and decimal versions need it.
+
 **Script drafts: compare and apply changes**
 - New **Compare Drafts** tab on every script: pick any two drafts and read them side by side,
   scene by scene. Removed words are shown in red, added words in green. "Changes only" hides

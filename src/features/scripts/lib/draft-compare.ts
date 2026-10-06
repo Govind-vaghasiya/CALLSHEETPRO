@@ -156,6 +156,12 @@ export function cleanSceneBody(description: string, furniture: Iterable<string> 
 /** Whitespace-insensitive form, for "is this the same text?" checks. */
 export const comparableText = (text: string) => text.replace(/\s+/g, ' ').trim()
 
+/** Parsed scenes with their text stored clean: heading line, then the body without page furniture. */
+export function withCleanText<T extends Pick<ParsedScene, 'heading' | 'description'>>(pages: ParsedPage[], scenes: T[]): T[] {
+  const furniture = findPageFurniture(pages)
+  return scenes.map((s) => ({ ...s, description: `${s.heading}\n${cleanSceneBody(s.description, furniture)}` }))
+}
+
 export function buildDraft(id: string, pages: ParsedPage[], parsed: ParsedScene[]): Draft {
   const furniture = findPageFurniture(pages)
   const seen = new Set<string>()
@@ -241,6 +247,63 @@ export function diffText(oldText: string, newText: string) {
     }
   }
   return { left, right, added, removed }
+}
+
+/**
+ * One stream for showing changes inline in a single column (the reader's yellow highlight):
+ * kept and new text come from the new version, removed text is slotted in where it was.
+ */
+export function diffInline(oldText: string, newText: string): DiffPart[] {
+  const tokenize = (t: string) => t.match(/\S+\s*|\s+/g) || []
+  const a = tokenize(oldText)
+  const b = tokenize(newText)
+  const out: DiffPart[] = []
+  const push = (op: DiffPart[0], text: string) => {
+    if (!text) return
+    const last = out[out.length - 1]
+    if (last && last[0] === op) last[1] += text
+    else out.push([op, text])
+  }
+  let ia = 0
+  let ib = 0
+  for (const c of diffArrays(a.map((t) => t.trim()), b.map((t) => t.trim()))) {
+    const n = c.count ?? c.value.length
+    if (c.added) {
+      push(1, b.slice(ib, ib + n).join(''))
+      ib += n
+    } else if (c.removed) {
+      // Removed text never breaks a line of the new version
+      push(-1, a.slice(ia, ia + n).join('').replace(/\s+/g, ' '))
+      ia += n
+    } else {
+      push(0, b.slice(ib, ib + n).join(''))
+      ia += n
+      ib += n
+    }
+  }
+  return out
+}
+
+/** Split diff segments into lines (on line breaks in kept/new text), keeping each line's segments. */
+export function diffLines(parts: DiffPart[]): Array<{ text: string; parts: DiffPart[] }> {
+  const lines: Array<{ text: string; parts: DiffPart[] }> = [{ text: '', parts: [] }]
+  for (const [op, text] of parts) {
+    const pieces = op === -1 ? [text] : text.split('\n')
+    pieces.forEach((piece, i) => {
+      if (i > 0) lines.push({ text: '', parts: [] })
+      const line = lines[lines.length - 1]
+      if (!piece) return
+      line.parts.push([op, piece])
+      if (op !== -1) line.text += piece
+    })
+  }
+  return lines
+}
+
+/** The scene as the reader shows it: clean heading, then the text without page furniture. */
+export function sceneDisplayText(heading: string | null, description: string | null, furniture: Iterable<string> = []): string {
+  const body = cleanSceneBody(description || '', furniture)
+  return heading ? `${heading}\n${body}` : body
 }
 
 function makeRow(left: DraftScene | null, right: DraftScene | null, pairedBy: PairedBy | null, score: number): CompareRow {
@@ -411,6 +474,9 @@ export interface ProjectSceneState {
   description: string | null
   script_document_id: string | null
   synopsis: string | null
+  /** Text before the last merge, while its changes are unreviewed (migration 025) */
+  accepted_heading?: string | null
+  accepted_description?: string | null
   /** CAST breakdown items in the scene */
   cast: string[]
   /** Shoot days the scene is scheduled on */
@@ -463,9 +529,11 @@ export function rowStatus(row: CompareRow, ctx: StatusContext): RowStatus {
   }
 
   if (row.left && !row.right) {
-    const scene = ctx.byNumber.get(row.left.number)
-    // Still in the app unless that number now belongs to a scene from the new draft
-    return scene && !fromNewDraft(scene) ? { state: 'PENDING', scene } : { state: 'APPLIED', scene: null }
+    // Still in the app unless that number now belongs to a scene from the new draft; a merge
+    // may have moved it aside as "5 OMITTED"
+    const atNumber = ctx.byNumber.get(row.left.number)
+    const scene = atNumber && !fromNewDraft(atNumber) ? atNumber : ctx.byNumber.get(`${row.left.number} OMITTED`)
+    return scene ? { state: 'PENDING', scene } : { state: 'APPLIED', scene: null }
   }
   const right = row.right!
   const atRight = ctx.byNumber.get(right.number)

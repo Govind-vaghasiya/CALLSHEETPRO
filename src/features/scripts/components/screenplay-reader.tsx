@@ -31,6 +31,16 @@ import { exportToFountain, exportToFDX } from '../lib/screenplay-export-utils'
 import { printFullScript, printScenes } from '../lib/screenplay-print'
 import { useDismiss } from '@/components/ui/use-dismiss'
 import { useFeedback } from '@/components/ui/feedback-provider'
+import { useRouter } from 'next/navigation'
+import {
+  cleanSceneBody,
+  diffInline,
+  diffLines,
+  findPageFurniture,
+  sceneDisplayText,
+  type DiffPart,
+} from '../lib/draft-compare'
+import { acceptSceneChangesAction, rejectSceneChangesAction } from '../tracked-change-actions'
 import { sceneMatchScore } from '@/features/scheduling/lib/scene-search'
 import type { RevisionColor } from '@/types/database'
 import { Input } from '@/components/ui/input'
@@ -112,7 +122,8 @@ export function ScreenplayReader({
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base')
 
   // Inline editing state for scene number
-  const { notify } = useFeedback()
+  const { notify, confirm } = useFeedback()
+  const router = useRouter()
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [movingSceneId, setMovingSceneId] = useState<string | null>(null)
@@ -236,19 +247,97 @@ export function ScreenplayReader({
     printFullScript({ title: printTitle, draftLabel, date: script.revision_date, pages, scenes })
   }
 
-  // Formatted Screenplay Lines for the SELECTED SCENE
-  const selectedSceneLines = useMemo(() => {
-    if (!activeSceneObj) return []
-    const textToFormat =
-      activeSceneObj.description && activeSceneObj.description.trim().length > 0
-        ? activeSceneObj.description.startsWith(activeSceneObj.heading || '')
-          ? activeSceneObj.description
-          : `${activeSceneObj.heading}\n\n${activeSceneObj.description}`
-        : activeSceneObj.heading || ''
+  // Page headers, page numbers and (MORE)/(CONT'D) breaks are never shown inside a scene
+  const furniture = useMemo(
+    () => findPageFurniture(pages.map((p) => ({ pageNumber: p.page_number, rawText: p.raw_text || '' }))),
+    [pages]
+  )
+  const [showDeletions, setShowDeletions] = useState(false)
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const pendingReview = (s: ScriptSceneItem | undefined | null) =>
+    !!s && s.accepted_description !== null && s.accepted_description !== undefined
+  const reviewCount = scenes.filter(pendingReview).length
 
-    const mapped = [{ sceneNumber: activeSceneObj.scene_number, heading: activeSceneObj.heading || '' }]
-    return classifyScreenplayLines(textToFormat, mapped)
-  }, [activeSceneObj])
+  // Formatted Screenplay Lines for the SELECTED SCENE. With changes to review, each line also
+  // carries its diff segments: new text is highlighted until accepted.
+  const { selectedSceneLines, selectedLineParts, headingChanged } = useMemo(() => {
+    if (!activeSceneObj) return { selectedSceneLines: [], selectedLineParts: [] as Array<DiffPart[] | null>, headingChanged: false }
+    const heading = activeSceneObj.heading || ''
+    const mapped = [{ sceneNumber: activeSceneObj.scene_number, heading }]
+    if (!pendingReview(activeSceneObj)) {
+      const text = sceneDisplayText(heading, activeSceneObj.description, furniture)
+      return { selectedSceneLines: classifyScreenplayLines(text, mapped), selectedLineParts: [], headingChanged: false }
+    }
+    const oldBody = cleanSceneBody(activeSceneObj.accepted_description || '', furniture)
+    const newBody = cleanSceneBody(activeSceneObj.description || '', furniture)
+    const tracked = diffLines(diffInline(oldBody, newBody))
+    const lines = classifyScreenplayLines([heading, ...tracked.map((l) => l.text)].join('\n'), mapped)
+    const parts = [null, ...tracked.map((l) => (l.parts.some(([op]) => op !== 0) ? l.parts : null))]
+    const oldHeading = (activeSceneObj.accepted_heading || '').replace(/\s+/g, ' ').trim().toUpperCase()
+    return {
+      selectedSceneLines: lines,
+      selectedLineParts: parts,
+      headingChanged: oldHeading !== heading.replace(/\s+/g, ' ').trim().toUpperCase(),
+    }
+  }, [activeSceneObj, furniture])
+
+  /** A line's text, with new words highlighted (and removed ones struck through when shown) */
+  const lineContent = (idx: number, text: string) => {
+    const parts = selectedLineParts[idx]
+    if (!parts) return text
+    return parts.map(([op, t], i) =>
+      op === 0 ? (
+        <span key={i}>{t}</span>
+      ) : op === 1 ? (
+        <mark key={i} className={readerTheme === 'WHITE' ? 'bg-yellow-200 text-inherit' : 'bg-yellow-500/35 text-inherit'}>
+          {t}
+        </mark>
+      ) : showDeletions ? (
+        <del key={i} className="text-red-600 decoration-red-500/80">
+          {t}
+        </del>
+      ) : null
+    )
+  }
+
+  const changesFromLabel = (s: ScriptSceneItem) => {
+    const v = s.changes_from_document_id ? draftVersions[s.changes_from_document_id] : undefined
+    return v !== undefined ? `v${v}` : 'the new draft'
+  }
+
+  const handleAcceptChanges = async (sceneIds?: string[]) => {
+    setReviewBusy(true)
+    const res = await acceptSceneChangesAction(script.project_id, sceneIds)
+    setReviewBusy(false)
+    if (res.error) return notify(res.error, 'error')
+    const ids = sceneIds ? new Set(sceneIds) : null
+    setScenes((prev) =>
+      prev.map((s) =>
+        !ids || ids.has(s.id) ? { ...s, accepted_heading: null, accepted_description: null, changes_from_document_id: null } : s
+      )
+    )
+    notify(sceneIds ? 'Changes accepted' : `Accepted changes in ${res.accepted ?? 0} scene${res.accepted === 1 ? '' : 's'}`, 'success')
+    router.refresh()
+  }
+
+  const handleRejectChanges = async (scene: ScriptSceneItem) => {
+    const isNew = scene.accepted_description === '' && !scene.accepted_heading
+    const ok = await confirm({
+      title: isNew ? `Remove new scene ${scene.scene_number}?` : `Reject the changes to scene ${scene.scene_number}?`,
+      message: isNew
+        ? 'This scene came with the new draft. Rejecting removes it from the master script, with its breakdown.'
+        : 'The scene goes back to its text before the merge. Breakdown items the merge added stay; remove them in the Breakdown if needed.',
+      confirmLabel: isNew ? 'Remove scene' : 'Reject changes',
+      destructive: true,
+    })
+    if (!ok) return
+    setReviewBusy(true)
+    const res = await rejectSceneChangesAction(script.project_id, scene.id)
+    setReviewBusy(false)
+    if (res.error) return notify(res.error, 'error')
+    notify(res.removed ? `Scene ${scene.scene_number} removed` : `Scene ${scene.scene_number} restored`, 'success')
+    router.refresh()
+  }
 
   // Current page text for FULL_PAGE mode
   const currentPage = useMemo(() => {
@@ -834,6 +923,32 @@ export function ScreenplayReader({
             </div>
           </div>
 
+          {reviewCount > 0 && (
+            <div className="flex items-center gap-2 rounded-md border border-yellow-500/50 bg-yellow-400/15 px-2.5 py-1.5 text-[11px] text-foreground">
+              <span className="inline-block size-2 rounded-sm bg-yellow-400" />
+              <span>
+                {reviewCount} scene{reviewCount === 1 ? '' : 's'} to review
+              </span>
+              {!readOnly && (
+                <button
+                  type="button"
+                  disabled={reviewBusy}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Accept all changes in ${reviewCount} scene${reviewCount === 1 ? '' : 's'}?`,
+                      message: 'The highlighted text becomes final in the master script.',
+                      confirmLabel: 'Accept all',
+                    })
+                    if (ok) handleAcceptChanges()
+                  }}
+                  className="ml-auto font-semibold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  Accept all
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Search Bar */}
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-faint" />
@@ -955,6 +1070,14 @@ export function ScreenplayReader({
                                 v{draftVersions[s.script_document_id]} text
                               </span>
                             )}
+                            {pendingReview(s) && (
+                              <span
+                                className="rounded bg-yellow-300 px-1 text-[9px] font-mono font-semibold text-zinc-900"
+                                title={`Changes from ${changesFromLabel(s)} to review`}
+                              >
+                                {s.accepted_description === '' && !s.accepted_heading ? 'new' : 'changed'}
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1071,7 +1194,9 @@ export function ScreenplayReader({
           {isEditingContent && viewMode === 'SINGLE_SCENE' ? (
             /* PROFESSIONAL SCREENPLAY STUDIO EDITOR (Matches user's reference) */
             <ScreenplayEditor
-              initialText={activeSceneObj?.description || activeSceneObj?.heading || ''}
+              initialText={
+                activeSceneObj ? sceneDisplayText(activeSceneObj.heading, activeSceneObj.description, furniture) : ''
+              }
               initialHeading={activeSceneObj?.heading || 'SCENE'}
               sceneNumber={activeSceneObj?.scene_number || '1'}
               theme={readerTheme}
@@ -1080,7 +1205,50 @@ export function ScreenplayReader({
               onCancel={() => setIsEditingContent(false)}
             />
           ) : (
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-3">
+              {/* Changes merged from a new draft, waiting to be accepted or rejected */}
+              {viewMode === 'SINGLE_SCENE' && activeSceneObj && pendingReview(activeSceneObj) && (
+                <div className="w-full max-w-[720px] flex flex-wrap items-center gap-2 rounded-lg border border-yellow-500/50 bg-yellow-400/15 px-3 py-2 text-xs text-foreground">
+                  <span className="inline-block size-2.5 rounded-sm bg-yellow-300 ring-1 ring-yellow-500/60" />
+                  <span>
+                    {activeSceneObj.accepted_description === '' && !activeSceneObj.accepted_heading
+                      ? `New scene from ${changesFromLabel(activeSceneObj)}`
+                      : `Changes from ${changesFromLabel(activeSceneObj)} are highlighted`}{' '}
+                    — they become final when you accept them.
+                  </span>
+                  <label className="ml-auto flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showDeletions}
+                      onChange={(e) => setShowDeletions(e.target.checked)}
+                      className="accent-red-500"
+                    />
+                    Show deletions
+                  </label>
+                  {!readOnly && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={() => handleRejectChanges(activeSceneObj)}
+                        className="rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground hover:bg-muted cursor-pointer disabled:opacity-50"
+                      >
+                        <X className="inline size-3 mr-1" />
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={() => handleAcceptChanges([activeSceneObj.id])}
+                        className="rounded-md bg-emerald-600 px-2 py-1 font-semibold text-white hover:bg-emerald-500 cursor-pointer disabled:opacity-50"
+                      >
+                        <Check className="inline size-3 mr-1" />
+                        Accept
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               <div
                 className={`w-full max-w-[720px] transition-colors min-h-[900px] relative ${
                   readerTheme === 'WHITE'
@@ -1146,7 +1314,7 @@ export function ScreenplayReader({
                                 }`}
                               >
                                 <span className="font-mono text-[90%]">{activeSceneObj?.scene_number}</span>
-                                <span className="flex-1 px-3">{line.text}</span>
+                                <span className="flex-1 px-3">{headingChanged ? <mark className={readerTheme === 'WHITE' ? 'bg-yellow-200 text-inherit' : 'bg-yellow-500/35 text-inherit'}>{lineContent(idx, line.text)}</mark> : line.text}</span>
                                 <span className="font-mono text-[90%] text-right">{activeSceneObj?.scene_number}</span>
                               </div>
                             </div>
@@ -1163,7 +1331,7 @@ export function ScreenplayReader({
                               }`}
                               style={{ paddingLeft: '37%' }}
                             >
-                              {line.text}
+                              {lineContent(idx, line.text)}
                             </div>
                           )
                         }
@@ -1178,7 +1346,7 @@ export function ScreenplayReader({
                               }`}
                               style={{ paddingLeft: '30%', fontSize: '92%' }}
                             >
-                              {line.text}
+                              {lineContent(idx, line.text)}
                             </div>
                           )
                         }
@@ -1191,7 +1359,7 @@ export function ScreenplayReader({
                               className={readerTheme === 'WHITE' ? 'text-[#111]' : 'text-zinc-100'}
                               style={{ paddingLeft: '20%', paddingRight: '20%' }}
                             >
-                              {line.text}
+                              {lineContent(idx, line.text)}
                             </div>
                           )
                         }
@@ -1205,13 +1373,15 @@ export function ScreenplayReader({
                                 readerTheme === 'WHITE' ? 'text-zinc-800' : 'text-zinc-300'
                               }`}
                             >
-                              {line.text}
+                              {lineContent(idx, line.text)}
                             </div>
                           )
                         }
 
                         // Empty Line
                         if (line.type === 'EMPTY') {
+                          // A line that only held removed text
+                          if (selectedLineParts[idx] && showDeletions) return <div key={idx}>{lineContent(idx, '')}</div>
                           return <div key={idx} className="h-[1.1em]" />
                         }
 
@@ -1223,7 +1393,7 @@ export function ScreenplayReader({
                               readerTheme === 'WHITE' ? 'text-[#111]' : 'text-zinc-300'
                             }`}
                           >
-                            {line.text}
+                            {lineContent(idx, line.text)}
                           </div>
                         )
                       })

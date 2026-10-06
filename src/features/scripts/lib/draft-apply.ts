@@ -26,6 +26,15 @@ type Client = SupabaseClient<Database>
 type SceneUpdate = Database['public']['Tables']['scenes']['Update']
 type SceneInsert = Database['public']['Tables']['scenes']['Insert']
 
+/** Migration 025 adds tracked changes and decimal versions; code works without them until it is run. */
+export const TRACKED_CHANGES_MIGRATION_HINT =
+  'Highlighted changes and decimal versions need a one-time database update: run supabase/migrations/025_script_versions_and_tracked_changes.sql in the Supabase SQL Editor.'
+
+export async function hasTrackedChangeColumns(sb: Client): Promise<boolean> {
+  const { error } = await sb.from('scenes').select('accepted_description').limit(1)
+  return !error
+}
+
 const normalize = (n: string) => n.trim().toUpperCase().replace(/^#/, '')
 
 /** Rebuild a draft's scenes from its stored pages. */
@@ -75,6 +84,8 @@ export async function loadProjectScenes(sb: Client, projectId: string): Promise<
     description: s.description,
     script_document_id: s.script_document_id,
     synopsis: (s as { synopsis?: string | null }).synopsis ?? null,
+    accepted_heading: s.accepted_heading ?? null,
+    accepted_description: s.accepted_description ?? null,
     cast: (cast || []).filter((c) => c.scene_id === s.id).map((c) => c.name.toUpperCase()),
     days: placements
       .filter((p) => p.scene_id === s.id && p.shoot_days)
@@ -90,6 +101,8 @@ export interface ApplyDraftResult {
   updated: number
   added: number
   deleted: number
+  /** Scenes the new draft dropped, renumbered out of the way ("5 OMITTED") */
+  parked: string[]
   skipped: Array<{ key: string; reason: string }>
 }
 
@@ -104,7 +117,8 @@ export async function applyDraftChanges(
   oldDocumentId: string,
   newDocumentId: string,
   overrides: PairOverrides,
-  decisions: RowDecision[]
+  /** 'ALL': every change with the default choices (merge a whole draft into the master) */
+  picked: RowDecision[] | 'ALL'
 ): Promise<ApplyDraftResult & { newDoc: { file_name: string; version: number } }> {
   const { data: docs } = await sb
     .from('script_documents')
@@ -127,8 +141,19 @@ export async function applyDraftChanges(
   const ctx = statusContext(rows, projectScenes, oldDraft, newDraft)
   const byNumber = ctx.byNumber
   const withOneLinerColumns = await hasOneLinerColumns(sb)
+  const tracking = await hasTrackedChangeColumns(sb)
   const now = new Date().toISOString()
-  const result: ApplyDraftResult = { updated: 0, added: 0, deleted: 0, skipped: [] }
+  const result: ApplyDraftResult = { updated: 0, added: 0, deleted: 0, parked: [], skipped: [] }
+  // Merging everything: changed, new and renumbered scenes; omitted scenes stay (delete them in Compare)
+  const decisions: RowDecision[] =
+    picked === 'ALL'
+      ? rows
+          .filter((r) => (r.kind !== 'UNCHANGED' || r.renumbered) && r.kind !== 'OMITTED')
+          .map((r) => {
+            const cast = new Set(rowStatus(r, ctx).scene?.cast ?? [])
+            return { key: r.key, addCast: r.charactersAdded.filter((c) => !cast.has(c)), removeCast: [] }
+          })
+      : picked
 
   // The new draft's scene text and layout, as scene sync stores it
   const parsedNew = new Map(
@@ -152,7 +177,8 @@ export async function applyDraftChanges(
       time_of_day: p.timeOfDay,
       page_start: p.pageStart,
       page_end: p.pageEnd,
-      description: p.description,
+      // Stored without page headers, page numbers and (MORE)/(CONT'D) breaks
+      description: `${p.heading}\n${right.body}`,
       estimated_duration: p.estimatedDuration,
       ...(withOneLinerColumns ? { page_eighths: p.pageEighths, time_of_day_label: p.timeLabel } : {}),
       updated_at: now,
@@ -164,6 +190,7 @@ export async function applyDraftChanges(
     | { kind: 'update'; row: CompareRow; scene: ProjectSceneState; decision: RowDecision; changed: boolean }
     | { kind: 'insert'; row: CompareRow; decision: RowDecision }
     | { kind: 'delete'; row: CompareRow; scene: ProjectSceneState }
+    | { kind: 'park'; row: CompareRow; scene: ProjectSceneState; number: string }
   let plans: Plan[] = []
   for (const decision of decisions) {
     const row = rowByKey.get(decision.key)
@@ -185,15 +212,32 @@ export async function applyDraftChanges(
     }
   }
 
+  // Merging everything: a scene the new draft dropped keeps its breakdown and schedule, but
+  // steps aside ("5 OMITTED") when the new draft gives its number to another scene — scripts
+  // numbered in order reuse every number after a removed scene.
+  if (picked === 'ALL') {
+    const wanted = new Set(plans.filter((p) => p.kind !== 'delete').map((p) => p.row.right!.number))
+    const taken = new Set(projectScenes.map((sc) => normalize(sc.scene_number)))
+    for (const row of rows) {
+      if (row.kind !== 'OMITTED' || !wanted.has(row.left!.number)) continue
+      const status = rowStatus(row, ctx)
+      if (status.state !== 'PENDING' || !status.scene) continue
+      let number = `${row.left!.number} OMITTED`
+      for (let k = 2; taken.has(number); k++) number = `${row.left!.number} OMITTED ${k}`
+      taken.add(number)
+      plans.push({ kind: 'park', row, scene: status.scene, number })
+    }
+  }
+
   // ---- A scene can only take a number that is free, or freed by this batch
   for (;;) {
     const leavingIds = new Set<string>()
     for (const p of plans) {
-      if (p.kind === 'delete') leavingIds.add(p.scene.id)
+      if (p.kind === 'delete' || p.kind === 'park') leavingIds.add(p.scene.id)
       if (p.kind === 'update' && normalize(p.scene.scene_number) !== p.row.right!.number) leavingIds.add(p.scene.id)
     }
     const blocked = plans.find((p) => {
-      if (p.kind === 'delete') return false
+      if (p.kind === 'delete' || p.kind === 'park') return false
       const occupant = byNumber.get(p.row.right!.number)
       const self = p.kind === 'update' ? p.scene.id : null
       return occupant && occupant.id !== self && !leavingIds.has(occupant.id)
@@ -222,6 +266,11 @@ export async function applyDraftChanges(
       deletions.push(p.scene.id)
       continue
     }
+    if (p.kind === 'park') {
+      updates.push({ id: p.scene.id, finalNumber: p.number, values: { updated_at: now } })
+      result.parked.push(p.number)
+      continue
+    }
     const right = p.row.right!
     if (p.kind === 'insert') {
       inserts.push({
@@ -232,6 +281,8 @@ export async function applyDraftChanges(
           revision_color: newDoc.revision_color,
           is_changed: true,
           ...fieldsFor(right.number),
+          // A new scene: all of it is highlighted until accepted
+          ...(tracking ? { accepted_heading: '', accepted_description: '', changes_from_document_id: newDocumentId } : {}),
         },
         addCast: cleanCast(p.decision.addCast),
       })
@@ -243,6 +294,14 @@ export async function applyDraftChanges(
       values: {
         ...fieldsFor(right.number),
         ...(p.changed ? { is_changed: true, revision_color: newDoc.revision_color } : {}),
+        // Keep the last confirmed text (from before an earlier unreviewed merge, if any)
+        ...(p.changed && tracking
+          ? {
+              accepted_heading: p.scene.accepted_heading ?? p.scene.heading ?? '',
+              accepted_description: p.scene.accepted_description ?? p.scene.description ?? '',
+              changes_from_document_id: newDocumentId,
+            }
+          : {}),
       },
     })
     castChanges.push({ sceneId: p.scene.id, add: cleanCast(p.decision.addCast), remove: cleanCast(p.decision.removeCast) })

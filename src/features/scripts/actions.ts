@@ -10,6 +10,8 @@ import { describeSync, relinkSceneLocation, syncScenesFromDraft, type SceneSyncS
 import { syncProjectBookings, syncProjectLinks } from '@/features/breakdown/lib/resource-links'
 import { forEachLimit } from '@/lib/async'
 import { parseSlugline } from './lib/slugline'
+import { withCleanText } from './lib/draft-compare'
+import { TRACKED_CHANGES_MIGRATION_HINT } from './lib/draft-apply'
 import type {
   RevisionColor,
   ScriptStatus,
@@ -56,6 +58,10 @@ export interface ScriptSceneItem {
   estimated_duration: number | null
   synopsis?: string | null
   synopsis_source?: 'AI' | 'USER' | null
+  /** Tracked changes (migration 025): the text before a draft was merged; null = nothing to review */
+  accepted_heading?: string | null
+  accepted_description?: string | null
+  changes_from_document_id?: string | null
   page_eighths?: number | null
   time_of_day_label?: string | null
   episode_number: string | null
@@ -234,7 +240,8 @@ export async function startScriptUploadAction(projectId: string, formData: FormD
   }
 
   const versionRaw = formData.get('version') as string
-  const version = versionRaw && !isNaN(Number(versionRaw)) && Number(versionRaw) > 0 ? Number(versionRaw) : 1
+  // Decimal versions (1.1, 5.6) are kept to two places
+  const version = versionRaw && Number(versionRaw) > 0 ? Math.round(Number(versionRaw) * 100) / 100 : 1
   const revisionColor = (formData.get('revisionColor') as RevisionColor) || 'WHITE'
   const revisionDate = (formData.get('revisionDate') as string) || new Date().toISOString().slice(0, 10)
   const revisionNotes = (formData.get('revisionNotes') as string) || null
@@ -309,6 +316,10 @@ export async function startScriptUploadAction(projectId: string, formData: FormD
       .select()
       .single()
 
+    if (docError && /integer/i.test(docError.message) && !Number.isInteger(version)) {
+      await admin.storage.from(SCRIPTS_BUCKET).remove([storagePath])
+      return { error: `Version ${version} has decimals. ${TRACKED_CHANGES_MIGRATION_HINT}` }
+    }
     if (docError || !insertedDoc) {
       console.error('Database doc insertion error:', docError)
       return { error: `Database error: ${docError?.message || 'Failed to save script'}` }
@@ -334,7 +345,7 @@ export async function startScriptUploadAction(projectId: string, formData: FormD
       becomesCurrent,
       previousCurrentId: currentDocs?.[0]?.id ?? null,
       totalPages: parseResult.totalPages,
-      scenes: becomesCurrent ? parseResult.scenes : [],
+      scenes: becomesCurrent ? withCleanText(parseResult.pages, parseResult.scenes) : [],
     }
   } catch (err: any) {
     console.error('Unhandled script upload error:', err)
@@ -438,7 +449,8 @@ export async function makeScriptCurrentAction(scriptId: string, projectId: strin
     .select('page_number, raw_text')
     .eq('script_document_id', scriptId)
     .order('page_number', { ascending: true })
-  const parsed = extractScenesFromPages((pages || []).map((p) => ({ pageNumber: p.page_number, rawText: p.raw_text || '' })))
+  const draftPages = (pages || []).map((p) => ({ pageNumber: p.page_number, rawText: p.raw_text || '' }))
+  const parsed = withCleanText(draftPages, extractScenesFromPages(draftPages))
   if (parsed.length > 0) {
     const summary = await syncScenesFromDraft(supabase, projectId, scriptId, parsed, doc.revision_color)
     await supabase
@@ -878,6 +890,8 @@ export async function updateSceneContentAction(
   if (error) return { error: error.message }
   // Needs migration 023; until it has been run the label simply isn't kept
   if (slug) await db.from('scenes').update({ time_of_day_label: slug.timeLabel }).eq('id', sceneId)
+  // Saving your own edit makes the scene final: any highlighted draft changes are accepted (migration 025)
+  await db.from('scenes').update({ accepted_heading: null, accepted_description: null, changes_from_document_id: null }).eq('id', sceneId)
 
   // A new location in the slugline re-links the scene's Location in Cast & Crew and the bookings
   if (updatePayload.location_name && before?.location_name !== updatePayload.location_name) {

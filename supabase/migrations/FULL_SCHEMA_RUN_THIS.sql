@@ -373,7 +373,7 @@ create table if not exists script_documents (
   file_type       script_file_type not null,
   file_size_bytes bigint,
   status          script_status not null default 'UPLOADED',
-  version         integer not null default 1,
+  version         numeric(6,2) not null default 1,
   revision_color  revision_color not null default 'WHITE',
   revision_date   date,
   revision_notes  text,

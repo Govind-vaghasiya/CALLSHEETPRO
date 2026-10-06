@@ -33,6 +33,7 @@ import {
   getProjectSceneStateAction,
 } from '@/features/scripts/compare-actions'
 import {
+  diffLines,
   compareDrafts,
   rowStatus,
   statusContext,
@@ -49,6 +50,7 @@ import {
 } from '@/features/scripts/lib/draft-compare'
 import { getRevisionColorMeta } from '@/features/scripts/lib/revision-colors'
 import { formatEighths } from '@/features/breakdown/lib/one-liners'
+import { classifyScreenplayLines } from '@/features/scripts/lib/screenplay-format'
 
 interface DraftCompareViewProps {
   projectId: string
@@ -578,11 +580,11 @@ function Parts({ parts }: { parts: DiffPart[] }) {
         op === 0 ? (
           <span key={i}>{text}</span>
         ) : op === -1 ? (
-          <del key={i} className="bg-red-500/15 text-red-700 dark:text-red-300 decoration-red-500/70">
+          <del key={i} className="bg-red-100 text-red-700 decoration-red-500/70">
             {text}
           </del>
         ) : (
-          <ins key={i} className="no-underline bg-emerald-500/20 text-emerald-800 dark:text-emerald-300">
+          <ins key={i} className="no-underline bg-yellow-200 text-[#111]">
             {text}
           </ins>
         )
@@ -815,7 +817,14 @@ function CompareRowView({
   )
 }
 
+/** One side of a scene, laid out like a screenplay page, with its changes marked inside the lines */
 function SceneText({ heading, body, empty, emptyLabel }: { heading: DiffPart[]; body: DiffPart[]; empty: boolean; emptyLabel: string }) {
+  const lines = useMemo(() => {
+    const tracked = diffLines(body)
+    const types = classifyScreenplayLines(tracked.map((l) => l.text).join('\n'), [])
+    return tracked.map((l, i) => ({ ...l, type: types[i]?.type ?? 'ACTION' }))
+  }, [body])
+
   if (empty) {
     return (
       <div className="flex items-center justify-center p-6 text-[11px] font-mono uppercase tracking-wider text-muted-foreground bg-muted/30">
@@ -823,14 +832,50 @@ function SceneText({ heading, body, empty, emptyLabel }: { heading: DiffPart[]; 
       </div>
     )
   }
+  // Screenplay paper is intentionally fixed white/black, like the reader
   return (
-    <div className="min-w-0 p-3 font-mono text-[12px] leading-relaxed text-foreground">
+    <div
+      className="min-w-0 bg-white text-[#111] px-5 py-4 text-[12px] leading-[1.55]"
+      style={{ fontFamily: "'Courier Prime', 'Courier New', Courier, monospace" }}
+    >
       <div className="mb-2 font-bold uppercase">
         <Parts parts={heading} />
       </div>
-      <div className="whitespace-pre-wrap break-words">
-        <Parts parts={body} />
-      </div>
+      {lines.map((l, i) => {
+        const content = <Parts parts={l.parts} />
+        if (l.type === 'EMPTY') return l.parts.length ? <div key={i}>{content}</div> : <div key={i} className="h-[1.1em]" />
+        if (l.type === 'CHARACTER')
+          return (
+            <div key={i} className="mt-3 font-bold uppercase" style={{ paddingLeft: '37%' }}>
+              {content}
+            </div>
+          )
+        if (l.type === 'PARENTHETICAL')
+          return (
+            <div key={i} className="italic text-zinc-700" style={{ paddingLeft: '30%' }}>
+              {content}
+            </div>
+          )
+        if (l.type === 'DIALOGUE')
+          return (
+            <div key={i} style={{ paddingLeft: '20%', paddingRight: '12%' }}>
+              {content}
+            </div>
+          )
+        if (l.type === 'TRANSITION')
+          return (
+            <div key={i} className="mt-2 text-right font-bold uppercase">
+              {content}
+            </div>
+          )
+        if (l.type === 'SLUGLINE')
+          return (
+            <div key={i} className="mt-3 font-bold uppercase">
+              {content}
+            </div>
+          )
+        return <div key={i}>{content}</div>
+      })}
     </div>
   )
 }

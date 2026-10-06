@@ -8,7 +8,10 @@ import {
   makeScriptCurrentAction,
   deleteScriptAction,
   getScriptDeleteImpactAction,
+  linkUploadedScriptAction,
 } from '@/features/scripts/actions'
+import { mergeDraftIntoMasterAction } from '@/features/scripts/compare-actions'
+import { useRouter } from 'next/navigation'
 import {
   getRevisionColorMeta,
   formatScriptBadge,
@@ -45,7 +48,9 @@ export function ScriptsHub({
   projectName,
   scripts,
 }: ScriptsHubProps) {
-  const { confirm } = useFeedback()
+  const { confirm, notify } = useFeedback()
+  const router = useRouter()
+  const [mergingId, setMergingId] = useState<string | null>(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [scriptToDelete, setScriptToDelete] = useState<ScriptDocumentWithStats | null>(null)
   const [deleteImpact, setDeleteImpact] = useState<Awaited<ReturnType<typeof getScriptDeleteImpactAction>>>(null)
@@ -70,12 +75,12 @@ export function ScriptsHub({
   const currentScript = scripts.find((s) => s.is_current) || scripts[0]
 
   // Suggested next version and revision color
-  const maxVersion = scripts.reduce((max, s) => Math.max(max, s.version), 0)
+  const maxVersion = scripts.reduce((max, s) => Math.max(max, Number(s.version)), 0)
   // The newest draft, when it is newer than the one the app follows (uploaded to review first)
   const newerDraft = currentScript?.is_current
     ? scripts.find((s) => !s.is_current && (s.version > currentScript.version || (s.version === currentScript.version && s.created_at > currentScript.created_at)))
     : undefined
-  const suggestedVersion = maxVersion + 1
+  const suggestedVersion = Math.floor(maxVersion) + 1
 
   const handleMakeCurrent = (scriptId: string) => {
     startTransition(async () => {
@@ -88,6 +93,41 @@ export function ScriptsHub({
       if (!ok) return
       await makeScriptCurrentAction(scriptId, projectId)
     })
+  }
+
+  /** Merge a draft's changes into the master script, highlighted for review (in short steps) */
+  const handleMerge = async (script: ScriptDocumentWithStats) => {
+    const ok = await confirm({
+      title: `Merge v${script.version} into the master script?`,
+      message:
+        'New and changed text goes into the master script highlighted in yellow, to accept or reject scene by scene. Breakdown, Cast & Crew links and schedule stay with each scene. Scenes missing from this draft are kept — delete them in Compare Drafts.',
+      confirmLabel: 'Merge',
+    })
+    if (!ok) return
+    setMergingId(script.id)
+    try {
+      const res = await mergeDraftIntoMasterAction(projectId, script.id)
+      if ('error' in res) return notify(res.error, 'error')
+      for (const s of res.skipped) notify(`Not merged — ${s.reason}`, 'error')
+      if (res.parked.length) notify(`Not in the new draft, kept as: ${res.parked.join(', ')} — delete them in Compare Drafts if they are cut`, 'info')
+      for (let stalls = 0; ; ) {
+        const link = await linkUploadedScriptAction(projectId)
+        if ('error' in link) {
+          notify(`Merged, but linking cast & locations failed: ${link.error}`, 'error')
+          break
+        }
+        if (link.remaining === 0) break
+        stalls = link.linked === 0 ? stalls + 1 : 0
+        if (stalls >= 2) break
+      }
+      const parts = [res.updated && `${res.updated} changed`, res.added && `${res.added} new`].filter(Boolean)
+      notify(parts.length ? `Merged: ${parts.join(', ')} — highlighted for review` : 'Nothing to merge: the master already has this draft', 'success')
+      router.push(`/projects/${projectId}/scripts/${script.id}?tab=reader`)
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not merge the draft.', 'error')
+    } finally {
+      setMergingId(null)
+    }
   }
 
   const handleDeleteScript = () => {
@@ -135,8 +175,8 @@ export function ScriptsHub({
         </Button>
       </div>
 
-      {/* Metrics Ribbon */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Metrics Ribbon: four small cards and the wider Master Script card */}
+      <div className={`grid grid-cols-2 gap-4 ${currentScript ? 'lg:grid-cols-6' : 'sm:grid-cols-4'}`}>
         {/* Metric 1: Current Draft */}
         <Card className="border-border bg-card/50">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
@@ -213,66 +253,46 @@ export function ScriptsHub({
             <p className="text-[11px] text-muted-foreground mt-1">Version history archived</p>
           </CardContent>
         </Card>
-      </div>
 
-      {/* Active Draft Banner (if scripts exist) */}
-      {currentScript && (
-        <div className="rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-card/60 to-card/80 p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <Badge className="bg-amber-500 text-zinc-950 font-bold text-[10px] uppercase">
-                Active Production Script
-              </Badge>
-              <span
-                className={`text-xs px-2.5 py-0.5 rounded-md border font-medium inline-flex items-center gap-1.5 ${
-                  getRevisionColorMeta(currentScript.revision_color).pillBg
-                } ${getRevisionColorMeta(currentScript.revision_color).pillBorder} ${
-                  getRevisionColorMeta(currentScript.revision_color).pillText
-                }`}
-              >
-                <span
-                  className={`size-2 rounded-full ${
-                    getRevisionColorMeta(currentScript.revision_color).dotBg
-                  }`}
-                />
-                v{currentScript.version} · {getRevisionColorMeta(currentScript.revision_color).label}
-              </span>
-            </div>
-
-            <h3 className="text-lg font-bold text-foreground tracking-tight">
-              {currentScript.file_name}
-            </h3>
-
-            {newerDraft && (
-              <Link
-                href={`/projects/${projectId}/scripts/${newerDraft.id}?tab=compare&base=${currentScript.id}`}
-                className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
-              >
-                v{newerDraft.version} ({newerDraft.file_name}) is uploaded but not applied yet — review the changes
-                <ArrowRight className="size-3" />
+        {/* Master Script: the working script that drafts merge into */}
+        {currentScript && (
+          <Card className="col-span-2 border-amber-500/40 bg-gradient-to-br from-amber-500/10 via-card/70 to-card">
+            <CardContent className="flex h-full items-center gap-4 p-4">
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-amber-500 text-zinc-950 font-bold text-[10px] uppercase">Master Script</Badge>
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                  <span className={`size-2 rounded-full ring-1 ring-border ${getRevisionColorMeta(currentScript.revision_color).dotBg}`} />
+                  v{currentScript.version} · {getRevisionColorMeta(currentScript.revision_color).label}
+                </span>
+              </div>
+              <div className="truncate text-sm font-bold text-foreground" title={currentScript.file_name}>
+                {currentScript.file_name}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {currentScript.total_scenes} scenes · {currentScript.total_pages} pages
+                {currentScript.revision_date && ` · Issued ${formatIssueDate(currentScript.revision_date)}`}
+              </p>
+              {newerDraft && (
+                <Link
+                  href={`/projects/${projectId}/scripts/${newerDraft.id}?tab=compare&base=${currentScript.id}`}
+                  className="inline-flex items-center gap-1 self-start rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+                >
+                  v{newerDraft.version} not merged yet — review
+                  <ArrowRight className="size-3" />
+                </Link>
+              )}
+              </div>
+              <Link href={`/projects/${projectId}/scripts/${currentScript.id}`} className="shrink-0">
+                <Button className="h-11 px-5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm cursor-pointer">
+                  Open Master Script
+                  <ArrowRight className="size-4 ml-1.5" />
+                </Button>
               </Link>
-            )}
-
-            <p className="text-xs text-muted-foreground">
-              {currentScript.total_scenes} scenes detected across {currentScript.total_pages} pages
-              {currentScript.revision_date && ` · Issued ${formatIssueDate(currentScript.revision_date)}`}
-              {currentScript.revision_notes && ` · "${currentScript.revision_notes}"`}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 self-stretch sm:self-auto shrink-0">
-            <Link
-              href={`/projects/${projectId}/scripts/${currentScript.id}`}
-              className="w-full sm:w-auto"
-            >
-              <Button className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs h-9 cursor-pointer">
-                <span>View Extracted Scenes & Breakdown</span>
-                <ArrowRight className="size-3.5 ml-1.5" />
-              </Button>
-            </Link>
-          </div>
-        </div>
-      )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       {/* Empty State */}
       {scripts.length === 0 ? (
@@ -338,14 +358,14 @@ export function ScriptsHub({
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             <span
-                              className={`px-2.5 py-1 rounded-md border text-xs font-semibold inline-flex items-center gap-1.5 ${colorMeta.pillBg} ${colorMeta.pillBorder} ${colorMeta.pillText}`}
+                              className="px-2.5 py-1 rounded-md border border-border bg-card text-xs font-semibold text-foreground inline-flex items-center gap-1.5"
                             >
-                              <span className={`size-2 rounded-full ${colorMeta.dotBg}`} />
+                              <span className={`size-2 rounded-full ring-1 ring-border ${colorMeta.dotBg}`} />
                               v{script.version} · {colorMeta.label.split(' ')[0]}
                             </span>
                             {script.is_current && (
                               <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px]">
-                                Active
+                                Master
                               </Badge>
                             )}
                           </div>
@@ -429,12 +449,12 @@ export function ScriptsHub({
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={isPending}
-                                title="Apply all of this draft's changes now, without reviewing them"
-                                onClick={() => handleMakeCurrent(script.id)}
+                                disabled={isPending || !!mergingId}
+                                title="Merge this draft's changes into the master script, highlighted for review"
+                                onClick={() => (currentScript?.is_current ? handleMerge(script) : handleMakeCurrent(script.id))}
                                 className="h-8 text-xs border-border text-amber-700 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
                               >
-                                Set as Active
+                                {mergingId === script.id ? 'Merging…' : currentScript?.is_current ? 'Merge into Master' : 'Set as Master'}
                               </Button>
                             )}
 

@@ -128,8 +128,8 @@ export function ScriptDetailView({
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-900 dark:text-amber-200 sm:order-none">
             <span>
               {isNewerThanCurrent
-                ? `v${script.version} is not applied yet — the app still follows ${currentDraft ? `v${currentDraft.version}` : 'another draft'}.`
-                : `A past draft${currentDraft ? ` (the app follows v${currentDraft.version})` : ''}.`}{' '}
+                ? `v${script.version} is not merged into the master script yet.`
+                : `A past draft${currentDraft ? ` (the master script follows v${currentDraft.version})` : ''}.`}{' '}
               Read only.
             </span>
             {activeTab !== 'COMPARE' && currentDraft && (
@@ -138,7 +138,7 @@ export function ScriptDetailView({
                 onClick={() => setActiveTab('COMPARE')}
                 className="font-semibold underline underline-offset-2 hover:no-underline cursor-pointer"
               >
-                {isNewerThanCurrent ? 'Review changes & apply' : `Compare with v${currentDraft.version}`}
+                {isNewerThanCurrent ? 'Review changes & merge' : `Compare with v${currentDraft.version}`}
               </button>
             )}
           </div>
@@ -257,6 +257,14 @@ export function ScriptDetailView({
                         {/* Scene Number */}
                         <span className="px-2 py-0.5 rounded bg-muted border border-border-strong text-amber-700 dark:text-amber-400 font-mono font-bold text-xs">
                           SCENE {scene.scene_number}
+                          {scene.accepted_description !== null && scene.accepted_description !== undefined && (
+                            <span
+                              className="ml-1.5 rounded bg-yellow-300 px-1 font-normal text-[10px] text-zinc-900"
+                              title="Changes from a merged draft — accept or reject them in the Script Reader"
+                            >
+                              to review
+                            </span>
+                          )}
                           {olderDraftOf(scene) && (
                             <span
                               className="ml-1.5 font-normal text-[10px] text-amber-800 dark:text-amber-300"
