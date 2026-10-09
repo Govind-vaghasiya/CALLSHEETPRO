@@ -24,10 +24,11 @@ const GROUPS: Array<{ label: string; types: string[] }> = [
   { label: 'Cast', types: ['CAST'] },
   { label: 'Background & Stunts', types: ['EXTRA', 'STUNT'] },
   { label: 'Locations', types: ['LOCATION'] },
-  { label: 'Props & Set', types: ['PROP', 'VEHICLE', 'ANIMAL', 'EQUIPMENT'] },
+  { label: 'Props & Set', types: ['PROP', 'SET_DRESSING', 'GREENERY', 'VEHICLE', 'ANIMAL'] },
   { label: 'Wardrobe & Makeup', types: ['WARDROBE', 'MAKEUP'] },
+  { label: 'Camera, Lighting & Equipment', types: ['CAMERA', 'LIGHTING_GRIP', 'EQUIPMENT'] },
   { label: 'Effects & Sound', types: ['VFX', 'SFX', 'SOUND', 'MUSIC'] },
-  { label: 'Other', types: ['OTHER'] },
+  { label: 'Other', types: ['SECURITY', 'ADDITIONAL_LABOR', 'OTHER'] },
 ]
 
 /** Detail popup for one scene: schedule placement, breakdown, and the scene's script text. */

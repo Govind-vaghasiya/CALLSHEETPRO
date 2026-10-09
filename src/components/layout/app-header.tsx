@@ -8,6 +8,7 @@ import { signOutAction } from '@/features/auth/actions'
 import { switchOrganizationAction } from '@/features/organizations/actions'
 import { useFeedback } from '@/components/ui/feedback-provider'
 import { ThemeSegmentedControl, ThemeToggleButton } from '@/components/theme/theme-toggle'
+import { CollaborationHeaderBar } from '@/features/collaboration/components/collaboration-header-bar'
 import {
   Settings,
   Clapperboard,
@@ -49,6 +50,8 @@ interface AppHeaderProps {
 
 export function AppHeader({ user, organizations, activeOrgId }: AppHeaderProps) {
   const pathname = usePathname()
+  // Inside a production (/projects/<id>/…) its activity feed and notifications sit in this bar
+  const projectId = pathname.match(/^\/projects\/([0-9a-f-]{36})(?:\/|$)/i)?.[1] ?? null
   const router = useRouter()
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false)
@@ -239,8 +242,9 @@ export function AppHeader({ user, organizations, activeOrgId }: AppHeaderProps) 
           {navLinks(false)}
         </nav>
 
-        {/* Right: Theme + User Menu */}
+        {/* Right: (inside a production) Activity + notifications, then theme + user menu */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {projectId && <CollaborationHeaderBar projectId={projectId} />}
           <ThemeToggleButton />
 
           <div className="relative" ref={userMenuRef}>

@@ -35,6 +35,8 @@ export const LINKED_RESOURCE_TYPE: Partial<Record<SceneElementType, ResourceType
   VEHICLE: 'VEHICLE',
   ANIMAL: 'ANIMAL',
   EQUIPMENT: 'EQUIPMENT',
+  CAMERA: 'EQUIPMENT',
+  LIGHTING_GRIP: 'EQUIPMENT',
 }
 
 /** Placeholder actor name for a character that has not been cast yet. */

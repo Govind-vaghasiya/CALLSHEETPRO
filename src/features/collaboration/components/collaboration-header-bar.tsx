@@ -3,7 +3,6 @@
 import React, { useState } from 'react'
 import { History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { PresenceAvatars } from './presence-avatars'
 import { ActivityFeedDrawer } from './activity-feed-drawer'
 import { NotificationBell } from '@/features/notifications/components/notification-bell'
 
@@ -15,10 +14,7 @@ export function CollaborationHeaderBar({ projectId }: CollaborationHeaderBarProp
   const [isActivityFeedOpen, setIsActivityFeedOpen] = useState(false)
 
   return (
-    <div className="flex items-center gap-2.5">
-      {/* Active Collaborators Presence Avatars */}
-      <PresenceAvatars projectId={projectId} />
-
+    <div className="flex items-center gap-1.5">
       {/* Activity Feed Drawer Trigger */}
       <Button
         type="button"

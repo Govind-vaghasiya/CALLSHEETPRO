@@ -20,6 +20,8 @@ export type SceneStatus = 'DETECTED' | 'REVIEWED' | 'CONFIRMED' | 'LOCKED'
 export type IntExt = 'INT' | 'EXT' | 'INT_EXT'
 export type TimeOfDay = 'DAY' | 'NIGHT' | 'DAWN' | 'DUSK' | 'CONTINUOUS' | 'LATER' | 'MOMENTS_LATER' | 'SAME_TIME'
 export type SceneElementType = 'CAST' | 'EXTRA' | 'PROP' | 'LOCATION' | 'WARDROBE' | 'MAKEUP' | 'VEHICLE' | 'ANIMAL' | 'STUNT' | 'VFX' | 'SFX' | 'SOUND' | 'EQUIPMENT' | 'MUSIC' | 'OTHER'
+  // migration 026
+  | 'SET_DRESSING' | 'GREENERY' | 'CAMERA' | 'LIGHTING_GRIP' | 'SECURITY' | 'ADDITIONAL_LABOR'
 export type ElementConfirmStatus = 'AI_DETECTED' | 'CONFIRMED' | 'EDITED' | 'REMOVED'
 export type SceneTagType = 'INT_EXT' | 'TIME_OF_DAY' | 'STUNT' | 'VFX_HEAVY' | 'NIGHT_SHOOT' | 'WATER' | 'ANIMALS' | 'CHILDREN' | 'SENSITIVE' | 'EXTERIOR_WEATHER' | 'CUSTOM'
 export type ShootDayStatus = 'DRAFT' | 'PLANNED' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED'

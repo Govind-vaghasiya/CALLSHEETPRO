@@ -48,6 +48,12 @@ import {
   Layers,
   Edit2,
   Link2,
+  Sofa,
+  Leaf,
+  Camera,
+  Lightbulb,
+  Shield,
+  HardHat,
 } from 'lucide-react'
 
 type ResourceRow = Database['public']['Tables']['resources']['Row']
@@ -78,24 +84,37 @@ const ELEMENT_TYPE_CONFIG: Record<
   SOUND: { label: 'Sound / Music Cues', icon: FileText, colorClass: 'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30' },
   EQUIPMENT: { label: 'Special Equipment', icon: Box, colorClass: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30' },
   MUSIC: { label: 'Music', icon: FileText, colorClass: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30' },
+  SET_DRESSING: { label: 'Set Dressing', icon: Sofa, colorClass: 'bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-500/30' },
+  GREENERY: { label: 'Greenery', icon: Leaf, colorClass: 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30' },
+  CAMERA: { label: 'Camera Equipment', icon: Camera, colorClass: 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30' },
+  LIGHTING_GRIP: { label: 'Lighting & Grip', icon: Lightbulb, colorClass: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30' },
+  SECURITY: { label: 'Security', icon: Shield, colorClass: 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/30' },
+  ADDITIONAL_LABOR: { label: 'Additional Labor', icon: HardHat, colorClass: 'bg-stone-500/10 text-stone-700 dark:text-stone-300 border-stone-500/30' },
   OTHER: { label: 'Other Elements', icon: Box, colorClass: 'bg-muted text-subtle-foreground border-border-strong' },
 }
 
+/** Dropdown and section order, grouped by department */
 const CATEGORY_KEYS: SceneElementType[] = [
   'CAST',
+  'EXTRA',
+  'STUNT',
   'LOCATION',
+  'SET_DRESSING',
+  'GREENERY',
   'PROP',
   'WARDROBE',
+  'MAKEUP',
   'VEHICLE',
-  'STUNT',
+  'ANIMAL',
   'VFX',
   'SFX',
-  'MAKEUP',
-  'EXTRA',
+  'CAMERA',
+  'LIGHTING_GRIP',
   'EQUIPMENT',
-  'ANIMAL',
   'SOUND',
   'MUSIC',
+  'SECURITY',
+  'ADDITIONAL_LABOR',
   'OTHER',
 ]
 

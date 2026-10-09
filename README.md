@@ -35,6 +35,27 @@ and Supabase.
 
 ## Changelog
 
+### 9 October 2026
+
+**Breakdown**
+- New categories (needs migration `026`): **Set Dressing, Greenery, Camera Equipment, Lighting &
+  Grip, Security, Additional Labor**. The category list is ordered by department. Camera and
+  lighting items link to Cast & Crew as Equipment, so they can be booked per shoot day.
+- One-liners moved into a wider fifth card at the end of the summary cards, with
+  **Draft with AI** and **Export one-liners** on its right.
+- A clear message (instead of a database error) when a category needs a migration.
+
+**Layout**
+- Production header: the section tabs (Overview … Settings) sit on the right of the production
+  name on wide screens; the dates, time zone and "only you" line were removed.
+- **Activity** and **notifications** moved to the top bar, next to the light/dark switch
+  (shown inside a production).
+- Script tab: the page title block was removed; **Upload New Draft** sits in the Master Script
+  card under **Open Master Script**.
+
+> **After pulling:** run `supabase/migrations/026_more_breakdown_categories.sql` once in the
+> Supabase SQL Editor (already done on the shared database).
+
 ### 6 October 2026
 
 **Master script with highlighted changes** (needs migration `025`)

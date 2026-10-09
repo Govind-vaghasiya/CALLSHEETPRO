@@ -184,7 +184,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
   return (
     <div className="space-y-6 w-full">
       {/* TOP PRODUCTION BREAKDOWN DASHBOARD STATS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {/* Total Scenes */}
         <div className="bg-background border border-border p-3.5 rounded-xl shadow-md space-y-1">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center justify-between">
@@ -240,40 +240,47 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
             High production requirements
           </div>
         </div>
-      </div>
 
-      {/* ONE-LINERS: AI drafts + export */}
-      <div className="bg-background border border-border rounded-xl px-3.5 py-2.5 shadow-md flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground min-w-0">
-          <FileText className="size-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
-          {drafting ? (
-            <span className="flex items-center gap-2 min-w-0">
-              <span className="text-foreground">
-                AI drafting one-liners… {drafting.done}/{drafting.total}
-              </span>
-              <span className="hidden sm:block w-32 h-1.5 rounded-full bg-muted overflow-hidden">
-                <span
-                  className="block h-full bg-amber-500 transition-all"
-                  style={{ width: `${Math.round((drafting.done / Math.max(1, drafting.total)) * 100)}%` }}
-                />
-              </span>
-            </span>
-          ) : (
-            <span>
-              ONE-LINERS: <strong className="text-foreground">{writtenCount}</strong> / {scenes.length} written
-              {aiDraftedCount > 0 && <span className="text-faint"> · {aiDraftedCount} AI drafts to review</span>}
-            </span>
-          )}
-        </div>
+        {/* ONE-LINERS: AI drafts + export (wider card on the right) */}
+        <div className="col-span-2 bg-background border border-border p-3.5 rounded-xl shadow-md flex items-center justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <FileText className="size-3.5 text-amber-600 dark:text-amber-500" />
+              <span>One-liners</span>
+            </div>
+            {drafting ? (
+              <>
+                <div className="text-xs font-mono text-foreground">
+                  AI drafting… {drafting.done}/{drafting.total}
+                </div>
+                <div className="w-32 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.round((drafting.done / Math.max(1, drafting.total)) * 100)}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-xl font-mono font-bold text-foreground">
+                  {writtenCount}
+                  <span className="text-sm font-normal text-muted-foreground"> / {scenes.length} written</span>
+                </div>
+                <div className="text-[10px] font-mono text-faint">
+                  {aiDraftedCount > 0 ? `${aiDraftedCount} AI drafts to review` : 'Short scene summaries'}
+                </div>
+              </>
+            )}
+          </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-stretch gap-1.5 shrink-0">
           {drafting ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => (cancelDraftRef.current = true)}
-              className="text-xs font-mono cursor-pointer"
+              className="w-full text-xs font-mono cursor-pointer"
             >
               <X className="size-3.5 mr-1" />
               Stop
@@ -285,7 +292,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
               size="sm"
               onClick={() => runDraft('fill')}
               disabled={scenes.length === 0}
-              className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-mono cursor-pointer"
+              className="w-full border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-mono cursor-pointer"
             >
               <Sparkles className="size-3.5 mr-1.5" />
               Draft {missingCount} with AI
@@ -296,7 +303,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
               variant="outline"
               size="sm"
               onClick={() => runDraft('redraft')}
-              className="text-xs font-mono cursor-pointer"
+              className="w-full text-xs font-mono cursor-pointer"
               title="Rewrite the AI drafts (hand-written one-liners are kept)"
             >
               <Sparkles className="size-3.5 mr-1.5" />
@@ -310,7 +317,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
               size="sm"
               onClick={() => setExportOpen((o) => !o)}
               disabled={exporting || exportScenes.length === 0}
-              className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs font-mono cursor-pointer"
+              className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs font-mono cursor-pointer"
             >
               {exporting ? <RefreshCw className="size-3.5 mr-1.5 animate-spin" /> : <Download className="size-3.5 mr-1.5" />}
               Export one-liners
@@ -342,6 +349,7 @@ export function BreakdownHub({ projectId, projectName, scenes: initialScenes, in
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
 

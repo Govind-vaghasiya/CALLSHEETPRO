@@ -3,9 +3,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getProjectById } from '@/features/projects/actions'
 import { Badge } from '@/components/ui/badge'
-import { Calendar, Clock, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { ProjectTabs } from '@/components/layout/project-tabs'
-import { CollaborationHeaderBar } from '@/features/collaboration/components/collaboration-header-bar'
 import { getActiveOrganization } from '@/features/organizations/active-org'
 import { SyncActiveOrganization } from '@/features/organizations/components/sync-active-organization'
 import { ProjectTitle, ProjectTitleProvider } from '@/features/projects/components/project-title'
@@ -31,9 +30,10 @@ export default async function ProjectLayout({
     <div className="flex-1 flex flex-col w-full">
       {otherOrg && <SyncActiveOrganization organizationId={project.organization_id} />}
       {/* Project Sub-Header */}
-      <div className="border-b border-border/80 bg-background/60 backdrop-blur-md px-4 sm:px-8 pt-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="space-y-1">
+      {/* Title on the left, section tabs on the right of the same row (tabs drop below on narrow screens) */}
+      <div className="border-b border-border/80 bg-background/60 backdrop-blur-md px-4 sm:px-8 pt-3">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-x-6 xl:pb-3">
+          <div className="space-y-1 pb-3 xl:pb-0 min-w-0">
             <div className="flex items-center gap-2">
               <Link
                 href="/projects"
@@ -65,30 +65,10 @@ export default async function ProjectLayout({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground font-mono">
-            <div className="flex items-center gap-1.5">
-              <Calendar className="size-3.5 text-muted-foreground" />
-              <span>
-                {project.start_date
-                  ? new Date(project.start_date).toLocaleDateString()
-                  : 'Start TBD'}{' '}
-                →{' '}
-                {project.target_end_date
-                  ? new Date(project.target_end_date).toLocaleDateString()
-                  : 'Wrap TBD'}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="size-3.5 text-muted-foreground" />
-              <span>{project.timezone}</span>
-            </div>
-            <CollaborationHeaderBar projectId={id} />
+          {/* Project Navigation Tabs */}
+          <div className="min-w-0 border-t border-border xl:border-t-0">
+            <ProjectTabs projectId={id} />
           </div>
-        </div>
-
-        {/* Project Navigation Tabs */}
-        <div className="mt-4 border-t border-border">
-          <ProjectTabs projectId={id} />
         </div>
       </div>
 

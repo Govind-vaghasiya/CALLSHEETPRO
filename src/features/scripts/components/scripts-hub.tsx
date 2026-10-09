@@ -45,7 +45,6 @@ interface ScriptsHubProps {
 
 export function ScriptsHub({
   projectId,
-  projectName,
   scripts,
 }: ScriptsHubProps) {
   const { confirm, notify } = useFeedback()
@@ -139,42 +138,7 @@ export function ScriptsHub({
   }
 
   return (
-    <div className="space-y-8 w-full">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link
-              href={`/projects/${projectId}`}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {projectName}
-            </Link>
-            <span className="text-faint text-xs">/</span>
-            <span className="text-xs font-mono font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-              Screenplay & Breakdown Engine
-            </span>
-            <Badge variant="outline" className="text-[10px]">
-              {scripts.length} {scripts.length === 1 ? 'Draft' : 'Drafts'}
-            </Badge>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-            Script Revisions & Scene Ingestion
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Ingest Final Draft (.fdx), PDF, or Fountain screenplays. Track Hollywood revision colors with automatic scene extraction.
-          </p>
-        </div>
-
-        <Button
-          onClick={() => setIsUploadModalOpen(true)}
-          className="h-10 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold shadow-lg shadow-amber-500/15 cursor-pointer"
-        >
-          <Upload className="size-4 mr-1.5" />
-          Upload New Draft
-        </Button>
-      </div>
-
+    <div className="space-y-6 w-full">
       {/* Metrics Ribbon: four small cards and the wider Master Script card */}
       <div className={`grid grid-cols-2 gap-4 ${currentScript ? 'lg:grid-cols-6' : 'sm:grid-cols-4'}`}>
         {/* Metric 1: Current Draft */}
@@ -283,12 +247,22 @@ export function ScriptsHub({
                 </Link>
               )}
               </div>
-              <Link href={`/projects/${projectId}/scripts/${currentScript.id}`} className="shrink-0">
-                <Button className="h-11 px-5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm cursor-pointer">
-                  Open Master Script
-                  <ArrowRight className="size-4 ml-1.5" />
+              <div className="flex shrink-0 flex-col gap-2">
+                <Link href={`/projects/${projectId}/scripts/${currentScript.id}`}>
+                  <Button className="w-full h-11 px-5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm cursor-pointer">
+                    Open Master Script
+                    <ArrowRight className="size-4 ml-1.5" />
+                  </Button>
+                </Link>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsUploadModalOpen(true)}
+                  className="w-full h-9 border-amber-500/50 text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 font-semibold text-xs cursor-pointer"
+                >
+                  <Upload className="size-3.5 mr-1.5" />
+                  Upload New Draft
                 </Button>
-              </Link>
+              </div>
             </CardContent>
           </Card>
         )}

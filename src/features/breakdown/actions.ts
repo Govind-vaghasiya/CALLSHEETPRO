@@ -361,6 +361,10 @@ export async function addSceneElementAction(
     .single()
 
   if (error || !data) {
+    // New categories need migration 026
+    if (error && /invalid input value for enum/i.test(error.message)) {
+      return { success: false, error: 'This category needs a one-time database update: run supabase/migrations/026_more_breakdown_categories.sql in the Supabase SQL Editor.' }
+    }
     return { success: false, error: error?.message || 'Failed to add element' }
   }
 
@@ -412,6 +416,10 @@ export async function updateSceneElementAction(
     .single()
 
   if (error || !after) {
+    // New categories need migration 026
+    if (error && /invalid input value for enum/i.test(error.message)) {
+      return { success: false, error: 'This category needs a one-time database update: run supabase/migrations/026_more_breakdown_categories.sql in the Supabase SQL Editor.' }
+    }
     return { success: false, error: error?.message || 'Failed to update element' }
   }
 
